@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "ztaloc"
 include(":app")
+include(":ztaloc")
