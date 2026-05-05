@@ -1,49 +1,114 @@
 package com.example.ztaloc.data
 
 import android.content.Context
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
-import kotlinx.serialization.encodeToString
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import com.example.ztaloc.api.PairedDevice
+import com.example.ztaloc.api.SemanticLocationLabel
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
+private val Context.ztaDataStore by preferencesDataStore(name = "zta_store")
 
-class LocalStore(context: Context) {
-    private val json = Json { ignoreUnknownKeys = true }
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "zta_store",
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+class LocalStore(private val context: Context) {
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    fun saveUser(user: LocalUser) {
-        prefs.edit().putString("user", json.encodeToString(user)).apply()
+    suspend fun saveUser(user: LocalUser) {
+        context.ztaDataStore.edit { prefs -> prefs[USER_KEY] = json.encodeToString(user) }
     }
 
-    fun getUser(): LocalUser? = prefs.getString("user", null)?.let { json.decodeFromString<LocalUser>(it) }
-
-    fun putSession(record: SessionRecord) {
-        prefs.edit().putString("session:${record.sessionId}", json.encodeToString(record)).apply()
+    suspend fun getUser(): LocalUser? {
+        val raw = context.ztaDataStore.data.first()[USER_KEY] ?: return null
+        return runCatching { json.decodeFromString<LocalUser>(raw) }.getOrNull()
     }
 
-    fun getSession(sessionId: String): SessionRecord? {
-        return prefs.getString("session:$sessionId", null)?.let { json.decodeFromString<SessionRecord>(it) }
+    suspend fun putSession(record: SessionRecord) {
+        context.ztaDataStore.edit { prefs -> prefs[sessionKey(record.sessionId)] = json.encodeToString(record) }
     }
 
-    fun putString(key: String, value: String) {
-        prefs.edit().putString(key, value).apply()
+    suspend fun getSession(sessionId: String): SessionRecord? {
+        val raw = context.ztaDataStore.data.first()[sessionKey(sessionId)] ?: return null
+        return runCatching { json.decodeFromString<SessionRecord>(raw) }.getOrNull()
+    }
+    suspend fun putString(key: String, value: String) {
+        context.ztaDataStore.edit { prefs -> prefs[stringPreferencesKey(key)] = value }
     }
 
-    fun getString(key: String): String? = prefs.getString(key, null)
+    suspend fun getString(key: String): String? = context.ztaDataStore.data.first()[stringPreferencesKey(key)]
 
-    fun remove(key: String) {
-        prefs.edit().remove(key).apply()
+    suspend fun remove(key: String) {
+        context.ztaDataStore.edit { prefs -> prefs.remove(stringPreferencesKey(key)) }
+    }
+
+    suspend fun getPairedDevices(): List<PairedDevice> {
+        val raw = context.ztaDataStore.data.first()[PAIRED_DEVICES_KEY] ?: return emptyList()
+        return runCatching { json.decodeFromString<PairedDeviceList>(raw).devices }.getOrDefault(emptyList())
+    }
+
+    suspend fun upsertPairedDevice(device: PairedDevice) {
+        val updated = getPairedDevices().filterNot { it.deviceId == device.deviceId } + device
+        context.ztaDataStore.edit { prefs ->
+            prefs[PAIRED_DEVICES_KEY] = json.encodeToString(PairedDeviceList(updated))
+        }
+    }
+
+    suspend fun removePairedDevice(deviceId: String) {
+        val updated = getPairedDevices().filterNot { it.deviceId == deviceId }
+        context.ztaDataStore.edit { prefs ->
+            if (updated.isEmpty()) {
+                prefs.remove(PAIRED_DEVICES_KEY)
+            } else {
+                prefs[PAIRED_DEVICES_KEY] = json.encodeToString(PairedDeviceList(updated))
+            }
+        }
+    }
+
+    suspend fun getPairedDevice(deviceId: String): PairedDevice? = getPairedDevices().firstOrNull { it.deviceId == deviceId }
+
+    suspend fun getSemanticLocationLabels(): List<SemanticLocationLabel> {
+        val raw = context.ztaDataStore.data.first()[SEMANTIC_LABELS_KEY] ?: return emptyList()
+        return runCatching { json.decodeFromString<SemanticLocationLabelList>(raw).labels }.getOrDefault(emptyList())
+    }
+
+    suspend fun upsertSemanticLocationLabel(label: SemanticLocationLabel) {
+        val normalized = label.copy(
+            label = label.label.trim(),
+            radiusMeters = SEMANTIC_LABEL_RADIUS_METERS
+        )
+        require(normalized.label.isNotBlank()) { "Semantic location label must not be blank" }
+        require(normalized.latitude in -90.0..90.0) { "Semantic location latitude must be between -90 and 90" }
+        require(normalized.longitude in -180.0..180.0) { "Semantic location longitude must be between -180 and 180" }
+
+        val updated = getSemanticLocationLabels()
+            .filterNot { it.label.equals(normalized.label, ignoreCase = true) } + normalized
+        context.ztaDataStore.edit { prefs ->
+            prefs[SEMANTIC_LABELS_KEY] = json.encodeToString(SemanticLocationLabelList(updated))
+        }
+    }
+
+    suspend fun removeSemanticLocationLabel(label: String) {
+        val updated = getSemanticLocationLabels().filterNot { it.label.equals(label.trim(), ignoreCase = true) }
+        context.ztaDataStore.edit { prefs ->
+            if (updated.isEmpty()) {
+                prefs.remove(SEMANTIC_LABELS_KEY)
+            } else {
+                prefs[SEMANTIC_LABELS_KEY] = json.encodeToString(SemanticLocationLabelList(updated))
+            }
+        }
     }
 
     fun newDeviceId(): String = UUID.randomUUID().toString()
+
+    private fun sessionKey(sessionId: String): Preferences.Key<String> = stringPreferencesKey("session:$sessionId")
+
+    companion object {
+        private val USER_KEY = stringPreferencesKey("user")
+        private val PAIRED_DEVICES_KEY = stringPreferencesKey("paired_devices")
+        private val SEMANTIC_LABELS_KEY = stringPreferencesKey("semantic_location_labels")
+        private const val SEMANTIC_LABEL_RADIUS_METERS = 100.0
+    }
 }

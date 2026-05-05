@@ -8,23 +8,17 @@ import java.io.File
 class DevicePostureCollector(private val context: Context) {
     fun collect(isRegistered: Boolean): DevicePosture {
         val rationale = mutableListOf<String>()
-        val rootDetected = isRootDetected().also {
-            if (it) rationale += "Root indicators detected"
-        }
+        val rootDetected = isRootDetected().also { if (it) rationale += "Root indicators detected" }
         val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-        val secureLock = keyguardManager.isDeviceSecure.also {
-            if (!it) rationale += "Secure lock screen disabled"
-        }
-        val osRecent = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R).also {
-            if (!it) rationale += "OS version considered old"
-        }
-        val hardwareKeys = true
+        val secureLock = keyguardManager.isDeviceSecure.also { if (!it) rationale += "Secure lock screen disabled" }
+        val osRecent = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        if (!osRecent) rationale += "OS version considered old"
         return DevicePosture(
             isRegistered = isRegistered,
             passesIntegrity = !rootDetected,
             osVersionRecentEnough = osRecent,
             secureLockEnabled = secureLock,
-            hardwareBackedKeysAvailable = hardwareKeys,
+            hardwareBackedKeysAvailable = true,
             rootOrJailbreakSuspected = rootDetected,
             rationale = rationale
         )

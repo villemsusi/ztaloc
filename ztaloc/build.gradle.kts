@@ -1,9 +1,13 @@
+import com.android.build.api.dsl.LibraryExtension
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.library")
+    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization") version "2.3.21"
 }
 
-android {
+extensions.configure<LibraryExtension>("android") {
     namespace = "com.example.ztaloc"
     compileSdk {
         version = release(36) {
@@ -12,7 +16,7 @@ android {
     }
 
     defaultConfig {
-        minSdk = 35
+        minSdk = 30
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
@@ -33,20 +37,21 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
+    }
+}
+
 dependencies {
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("com.google.android.play:integrity:1.4.0")
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
-    implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.kotlinx.serialization.json)
-    implementation(libs.androidx.security.crypto)
-    implementation(libs.play.services.location)
-    implementation(libs.integrity)
-    implementation(libs.okhttp)
+    testImplementation("junit:junit:4.13.2")
 
-    testImplementation(libs.junit)
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 }

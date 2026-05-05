@@ -8,11 +8,6 @@ class BehaviorMonitor {
         val failures = recentFailures >= 3
         if (failures) notes += "Repeated prior failures"
         if (impossibleMovement) notes += "Implausible movement pattern detected"
-        return BehaviorSignals(
-            normalRequestRate = normalRate,
-            repeatedFailures = failures,
-            impossibleMovementSuspected = impossibleMovement,
-            notes = notes
-        )
+        return BehaviorSignals(normalRate, failures, impossibleMovement, notes)
     }
 }

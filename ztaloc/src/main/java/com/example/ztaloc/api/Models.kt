@@ -3,15 +3,56 @@ package com.example.ztaloc.api
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class DeviceRegistrationResult(
+data class SetupResult(
     val userId: String,
     val deviceId: String,
-    val registrationId: String?,
-    val registeredAtEpochMs: Long,
-    val publicSigningKeyB64: String,
+    val alreadyInitialized: Boolean,
     val message: String
 )
 
+@Serializable
+data class DeviceRegistrationInfo(
+    val userId: String,
+    val displayName: String?,
+    val deviceId: String,
+    val signingPublicKeyB64: String,
+    val encryptionPublicKeyB64: String,
+    val registeredAtEpochMs: Long
+)
+
+@Serializable
+data class PairedDevice(
+    val userId: String,
+    val displayName: String?,
+    val deviceId: String,
+    val signingPublicKeyB64: String,
+    val encryptionPublicKeyB64: String,
+    val pairedAtEpochMs: Long
+)
+
+@Serializable
+data class SemanticLocationLabel(
+    val label: String,
+    val latitude: Double,
+    val longitude: Double,
+    val radiusMeters: Double = 100.0
+)
+
+@Serializable
+data class OutgoingRequest(
+    val sessionId: String,
+    val targetUserId: String,
+    val targetDeviceId: String,
+    val payload: String
+)
+
+@Serializable
+data class OutgoingResponse(
+    val sessionId: String,
+    val requesterUserId: String,
+    val requesterDeviceId: String,
+    val payload: String
+)
 
 @Serializable
 data class LocationAccessResult(
@@ -31,7 +72,6 @@ enum class AccessDecision {
     REQUIRE_STEP_UP,
     DENY
 }
-
 @Serializable
 enum class LocationExposure {
     PRECISE,

@@ -1,19 +1,18 @@
 package com.example.ztaloc.api
 
-import android.content.Context
-import com.example.ztaloc.core.DefaultZtaLocationClient
-import com.example.ztaloc.core.ZtaConfig
-
 interface ZtaLocationClient {
-    suspend fun initializeUser(userId: String, displayName: String? = null): Result<Unit>
-    suspend fun registerCurrentDevice(): Result<DeviceRegistrationResult>
-    suspend fun requestLocation(targetUserId: String): Result<LocationAccessResult>
-    suspend fun respondToLocationRequest(requestEnvelopeJson: String): Result<String>
-    suspend fun reevaluateSession(sessionId: String): Result<LocationAccessResult>
-}
+    suspend fun setupUser(userId: String, displayName: String? = null): Result<SetupResult>
+    suspend fun getDeviceRegistrationInfo(): Result<DeviceRegistrationInfo>
+    suspend fun upsertPairedDevice(device: PairedDevice): Result<Unit>
+    suspend fun removePairedDevice(deviceId: String): Result<Unit>
+    suspend fun listPairedDevices(): Result<List<PairedDevice>>
+    suspend fun upsertSemanticLocationLabel(label: String, latitude: Double, longitude: Double): Result<Unit>
+    suspend fun removeSemanticLocationLabel(label: String): Result<Unit>
+    suspend fun listSemanticLocationLabels(): Result<List<SemanticLocationLabel>>
 
-object ZtaLocation {
-    fun create(context: Context, config: ZtaConfig): ZtaLocationClient {
-        return DefaultZtaLocationClient(context.applicationContext, config)
-    }
+    suspend fun createLocationRequest(target: PairedDevice): Result<OutgoingRequest>
+    suspend fun processIncomingRequest(requestPayload: String): Result<OutgoingResponse>
+    suspend fun processIncomingResponse(responsePayload: String): Result<LocationAccessResult>
+
+    suspend fun reevaluateSession(sessionId: String): Result<LocationAccessResult>
 }

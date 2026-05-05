@@ -1,5 +1,8 @@
 package com.example.ztaloc.device
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class DevicePosture(
     val isRegistered: Boolean,
     val passesIntegrity: Boolean,

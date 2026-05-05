@@ -4,215 +4,320 @@ import android.content.Context
 import com.example.ztaloc.api.*
 import com.example.ztaloc.behavior.BehaviorMonitor
 import com.example.ztaloc.context.ContextSignalsCollector
-import com.example.ztaloc.crypto.CryptoManager
+import com.example.ztaloc.crypto.HybridEncryptedEnvelope
+import com.example.ztaloc.crypto.TransportCrypto
 import com.example.ztaloc.data.LocalStore
 import com.example.ztaloc.data.LocalUser
 import com.example.ztaloc.data.SessionRecord
 import com.example.ztaloc.device.DevicePostureCollector
 import com.example.ztaloc.location.LocationProvider
 import com.example.ztaloc.location.LocationTransformer
-import com.example.ztaloc.network.RelayClient
-import com.example.ztaloc.network.RequestEnvelope
-import com.example.ztaloc.network.ResponseEnvelope
 import com.example.ztaloc.policy.PolicyEvaluator
 import com.example.ztaloc.policy.TrustInputs
 import com.example.ztaloc.policy.TrustScoreEngine
+import com.example.ztaloc.protocol.RequestClaims
+import com.example.ztaloc.protocol.ResponseClaims
+import com.example.ztaloc.protocol.UnsignedRequestClaims
+import com.example.ztaloc.protocol.UnsignedResponseClaims
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import java.util.UUID
 
 class DefaultZtaLocationClient(
-    private val context: Context,
-    private val config: ZtaConfig
+    private val context: Context
 ) : ZtaLocationClient {
-
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val store = LocalStore(context)
-    private val crypto = CryptoManager(context)
+    private val crypto = TransportCrypto()
     private val devicePostureCollector = DevicePostureCollector(context)
-    private val contextSignalsCollector = ContextSignalsCollector(
-        context,
-        config.trustedWifiSsids,
-        config.knownHoursStart,
-        config.knownHoursEnd
-    )
+    private val contextSignalsCollector = ContextSignalsCollector(context)
     private val behaviorMonitor = BehaviorMonitor()
     private val trustScoreEngine = TrustScoreEngine()
-    private val policyEvaluator = PolicyEvaluator(config)
+    private val policyEvaluator = PolicyEvaluator()
     private val locationProvider = LocationProvider(context)
     private val transformer = LocationTransformer()
-    private val relayClient = RelayClient(OkHttpClient(), config.relayBaseUrl.toString().trimEnd('/'))
 
     companion object {
         private const val SIGNING_ALIAS = "zta_signing"
-        private const val PAYLOAD_ALIAS = "zta_payload"
+        private const val ENCRYPTION_ALIAS = "zta_encryption"
+        private const val REQUEST_MAX_AGE_MS = 60_000L
     }
 
-    override suspend fun initializeUser(userId: String, displayName: String?): Result<Unit> = runCatching {
+    override suspend fun setupUser(userId: String, displayName: String?): Result<SetupResult> = runCatching {
+        val existingUser = store.getUser()
+
+        if (existingUser != null && existingUser.userId == userId && existingUser.deviceId != null && existingUser.registeredAtEpochMs != null) {
+            return@runCatching SetupResult(
+                userId = existingUser.userId,
+                deviceId = requireNotNull(existingUser.deviceId),
+                alreadyInitialized = true,
+                message = "User and device already initialized"
+            )
+        }
+        if (existingUser != null && existingUser.userId != userId) {
+            clearLocalUserState()
+        }
+
         crypto.ensureSigningKey(SIGNING_ALIAS)
-        crypto.ensureAesKey(PAYLOAD_ALIAS)
-        val existing = store.getUser()
-        store.saveUser(
-            LocalUser(
-                userId = userId,
-                displayName = displayName,
-                deviceId = existing?.deviceId,
-                registeredAtEpochMs = existing?.registeredAtEpochMs
-            )
-        )
-    }
+        crypto.ensureEncryptionKey(ENCRYPTION_ALIAS)
 
-    override suspend fun registerCurrentDevice(): Result<DeviceRegistrationResult> = runCatching {
-        val user = requireNotNull(store.getUser()) { "User not initialized" }
-        crypto.ensureSigningKey(SIGNING_ALIAS)
-        val deviceId = user.deviceId ?: store.newDeviceId()
-        val registeredAt = System.currentTimeMillis()
-        val publicKeyB64 = crypto.getPublicKey(SIGNING_ALIAS)
+        val deviceId = store.newDeviceId()
+        val now = System.currentTimeMillis()
+        store.saveUser(LocalUser(userId, displayName, deviceId, now))
 
-        val unsignedPayload = json.encodeToString(
-            mapOf(
-                "userId" to user.userId,
-                "displayName" to (user.displayName ?: ""),
-                "deviceId" to deviceId,
-                "platform" to "android",
-                "appPackageName" to config.appPackageName,
-                "appVersion" to config.appVersion,
-                "publicSigningKeyB64" to publicKeyB64,
-                "registeredAtEpochMs" to registeredAt.toString()
-            )
-        )
-        val signature = crypto.sign(SIGNING_ALIAS, unsignedPayload)
-
-        val relayResponse = relayClient.registerDevice(
-            com.example.ztaloc.network.DeviceRegistrationPayload(
-                userId = user.userId,
-                displayName = user.displayName,
-                deviceId = deviceId,
-                platform = "android",
-                appPackageName = config.appPackageName,
-                appVersion = config.appVersion,
-                publicSigningKeyB64 = publicKeyB64,
-                registeredAtEpochMs = registeredAt,
-                signatureB64 = signature
-            )
-        ).getOrThrow()
-
-        if (!relayResponse.accepted) error(relayResponse.message)
-
-        store.saveUser(user.copy(deviceId = deviceId, registeredAtEpochMs = registeredAt))
-        relayResponse.serverAssignedRegistrationId?.let { store.putString("registration_id", it) }
-        store.putString("public_signing_key_b64", publicKeyB64)
-
-        DeviceRegistrationResult(
-            userId = user.userId,
+        SetupResult(
+            userId = userId,
             deviceId = deviceId,
-            registrationId = relayResponse.serverAssignedRegistrationId,
-            registeredAtEpochMs = registeredAt,
-            publicSigningKeyB64 = publicKeyB64,
-            message = relayResponse.message
+            alreadyInitialized = false,
+            message = "User and device setup completed"
         )
     }
 
-    override suspend fun requestLocation(targetUserId: String): Result<LocationAccessResult> = runCatching {
+    override suspend fun getDeviceRegistrationInfo(): Result<DeviceRegistrationInfo> = runCatching {
         val user = requireNotNull(store.getUser()) { "User not initialized" }
-        val deviceId = requireNotNull(user.deviceId) { "Current device not registered" }
-        val sessionId = UUID.randomUUID().toString()
-        val requestEpochMs = System.currentTimeMillis()
-        val signedPayload = json.encodeToString(
-            mapOf(
-                "sessionId" to sessionId,
-                "requesterUserId" to user.userId,
-                "targetUserId" to targetUserId,
-                "requesterDeviceId" to deviceId,
-                "requestEpochMs" to requestEpochMs.toString(),
-                "identityAuthenticated" to "true",
-                "multiFactorSatisfied" to "true"
+        DeviceRegistrationInfo(
+            userId = user.userId,
+            displayName = user.displayName,
+            deviceId = requireNotNull(user.deviceId) { "Device not initialized" },
+            signingPublicKeyB64 = crypto.exportPublicKey(SIGNING_ALIAS),
+            encryptionPublicKeyB64 = crypto.exportPublicKey(ENCRYPTION_ALIAS),
+            registeredAtEpochMs = requireNotNull(user.registeredAtEpochMs)
+        )
+    }
+    override suspend fun upsertPairedDevice(device: PairedDevice): Result<Unit> = runCatching {
+        store.upsertPairedDevice(device)
+    }
+
+    override suspend fun removePairedDevice(deviceId: String): Result<Unit> = runCatching {
+        store.removePairedDevice(deviceId)
+    }
+
+    override suspend fun listPairedDevices(): Result<List<PairedDevice>> = runCatching {
+        store.getPairedDevices()
+    }
+
+    override suspend fun upsertSemanticLocationLabel(label: String, latitude: Double, longitude: Double): Result<Unit> = runCatching {
+        store.upsertSemanticLocationLabel(
+            SemanticLocationLabel(
+                label = label,
+                latitude = latitude,
+                longitude = longitude
             )
         )
-        val signature = crypto.sign(SIGNING_ALIAS, signedPayload)
-        val envelope = RequestEnvelope(
-            sessionId = sessionId,
-            requesterUserId = user.userId,
-            targetUserId = targetUserId,
-            requesterDeviceId = deviceId,
-            requestEpochMs = requestEpochMs,
+    }
+
+    override suspend fun removeSemanticLocationLabel(label: String): Result<Unit> = runCatching {
+        store.removeSemanticLocationLabel(label)
+    }
+
+    override suspend fun listSemanticLocationLabels(): Result<List<SemanticLocationLabel>> = runCatching {
+        store.getSemanticLocationLabels()
+    }
+
+    override suspend fun createLocationRequest(target: PairedDevice): Result<OutgoingRequest> = runCatching {
+        val user = requireNotNull(store.getUser()) { "User not initialized" }
+        val deviceId = requireNotNull(user.deviceId) { "Device not initialized" }
+        val sessionId = java.util.UUID.randomUUID().toString()
+        val requestEpochMs = System.currentTimeMillis()
+
+        val requesterTrustInputs = TrustInputs(
             identityAuthenticated = true,
             multiFactorSatisfied = true,
-            signedPayload = signedPayload,
+            devicePosture = devicePostureCollector.collect(isRegistered = true),
+            contextSignals = contextSignalsCollector.collect(requestEpochMs),
+            behaviorSignals = behaviorMonitor.collect()
+        )
+        val unsignedClaims = UnsignedRequestClaims(
+            sessionId = sessionId,
+            requesterUserId = user.userId,
+            requesterDisplayName = user.displayName,
+            requesterDeviceId = deviceId,
+            requesterSigningPublicKeyB64 = crypto.exportPublicKey(SIGNING_ALIAS),
+            requestEpochMs = requestEpochMs,
+            requesterTrustInputs = requesterTrustInputs
+        )
+        val signature = crypto.sign(SIGNING_ALIAS, json.encodeToString(unsignedClaims))
+
+        val claims = RequestClaims(
+            sessionId = sessionId,
+            requesterUserId = user.userId,
+            requesterDisplayName = user.displayName,
+            requesterDeviceId = deviceId,
+            requesterSigningPublicKeyB64 = crypto.exportPublicKey(SIGNING_ALIAS),
+            requestEpochMs = requestEpochMs,
+            requesterTrustInputs = requesterTrustInputs,
             signatureB64 = signature
         )
-        relayClient.sendRequest(envelope).getOrThrow()
-        store.putSession(SessionRecord(sessionId, user.userId, targetUserId, requestEpochMs, 0, "PENDING"))
-        LocationAccessResult(
+        val plain = json.encodeToString(claims)
+        val encrypted = crypto.hybridEncrypt(target.encryptionPublicKeyB64, plain, deviceId, target.deviceId)
+        val payload = json.encodeToString(encrypted)
+
+        store.putSession(SessionRecord(sessionId, user.userId, target.userId, requestEpochMs, 0, "PENDING"))
+
+        OutgoingRequest(
             sessionId = sessionId,
-            decision = AccessDecision.REQUIRE_STEP_UP,
-            trustScore = 0,
-            exposure = LocationExposure.NONE,
-            locationPayload = null,
-            reason = "Request submitted to relay; await target response"
+            targetUserId = target.userId,
+            targetDeviceId = target.deviceId,
+            payload = payload
         )
     }
 
-    override suspend fun respondToLocationRequest(requestEnvelopeJson: String): Result<String> = runCatching {
-        val request = json.decodeFromString<RequestEnvelope>(requestEnvelopeJson)
-        val localUser = requireNotNull(store.getUser()) { "User not initialized" }
-        check(localUser.userId == request.targetUserId) { "This request is not addressed to current user" }
-        val registered = request.requesterDeviceId.isNotBlank()
-        val posture = devicePostureCollector.collect(isRegistered = registered)
-        val contextSignals = contextSignalsCollector.collect(request.requestEpochMs)
-        val behaviorSignals = behaviorMonitor.collect()
-        val inputs = TrustInputs(
-            identityAuthenticated = request.identityAuthenticated,
-            multiFactorSatisfied = request.multiFactorSatisfied,
-            devicePosture = posture,
-            contextSignals = contextSignals,
-            behaviorSignals = behaviorSignals
+    override suspend fun processIncomingRequest(requestPayload: String): Result<OutgoingResponse> = runCatching {
+        val envelope = json.decodeFromString<HybridEncryptedEnvelope>(requestPayload)
+        val plain = crypto.hybridDecrypt(ENCRYPTION_ALIAS, envelope)
+        val claims = json.decodeFromString<RequestClaims>(plain)
+        val targetUser = requireNotNull(store.getUser()) { "Target user not initialized" }
+        val targetDeviceId = requireNotNull(targetUser.deviceId) { "Target device not initialized" }
+
+        check(envelope.recipientDeviceId == targetDeviceId) {
+            "Incoming request is not addressed to this device"
+        }
+        check(envelope.senderDeviceId == claims.requesterDeviceId) {
+            "Incoming request sender device mismatch"
+        }
+        check(System.currentTimeMillis() - claims.requestEpochMs <= REQUEST_MAX_AGE_MS) {
+            "Incoming request is no longer fresh"
+        }
+        check(store.getString(processedRequestKey(claims.sessionId)) == null) {
+            "Incoming request has already been processed"
+        }
+
+        val pairedRequester: PairedDevice = store.getPairedDevice(claims.requesterDeviceId)
+            ?: error("Requester device is not paired")
+        check(pairedRequester.signingPublicKeyB64 == claims.requesterSigningPublicKeyB64) {
+            "Incoming request signing key does not match paired device"
+        }
+
+        val unsignedClaims = UnsignedRequestClaims(
+            sessionId = claims.sessionId,
+            requesterUserId = claims.requesterUserId,
+            requesterDisplayName = claims.requesterDisplayName,
+            requesterDeviceId = claims.requesterDeviceId,
+            requesterSigningPublicKeyB64 = claims.requesterSigningPublicKeyB64,
+            requestEpochMs = claims.requestEpochMs,
+            requesterTrustInputs = claims.requesterTrustInputs
         )
-        val score = trustScoreEngine.calculate(inputs)
-        val policy = policyEvaluator.evaluate(score.total)
+
+        check(crypto.verify(pairedRequester.signingPublicKeyB64, json.encodeToString(unsignedClaims), claims.signatureB64)) {
+            "Incoming request signature invalid"
+        }
+        store.putString(processedRequestKey(claims.sessionId), System.currentTimeMillis().toString())
+
+        val score = trustScoreEngine.calculate(claims.requesterTrustInputs)
+        val policy = policyEvaluator.evaluate(score)
         val precise = locationProvider.getCurrentPreciseLocation()
         val payload = if (precise != null && policy.exposure != LocationExposure.NONE) {
-            transformer.transform(precise, policy.exposure)
+            transformer.transform(precise, policy.exposure, store.getSemanticLocationLabels())
         } else null
-        val responseModel = LocationAccessResult(
-            sessionId = request.sessionId,
-            decision = policy.decision,
-            trustScore = score.total,
-            exposure = policy.exposure,
-            locationPayload = payload,
-            reason = policy.rationale
-        )
-        val encryptedPayload = crypto.encrypt(PAYLOAD_ALIAS, json.encodeToString(responseModel))
-        val responseJson = json.encodeToString(encryptedPayload)
-        val signature = crypto.sign(SIGNING_ALIAS, responseJson)
-        val envelope = ResponseEnvelope(
-            sessionId = request.sessionId,
-            targetUserId = localUser.userId,
-            encryptedPayloadJson = responseJson,
-            signatureB64 = signature,
-            issuedAtEpochMs = System.currentTimeMillis()
-        )
-        relayClient.sendResponse(envelope).getOrThrow()
-        json.encodeToString(envelope)
-    }
 
+        val locationJson = payload?.let { json.encodeToString(it) }
+        val issuedAtEpochMs = System.currentTimeMillis()
+        val unsignedResponse = UnsignedResponseClaims(
+            sessionId = claims.sessionId,
+            targetUserId = targetUser.userId,
+            targetDeviceId = targetDeviceId,
+            targetSigningPublicKeyB64 = crypto.exportPublicKey(SIGNING_ALIAS),
+            trustScore = score.total,
+            decision = policy.decision.name,
+            exposure = policy.exposure.name,
+            locationJson = locationJson,
+            reason = policy.rationale,
+            issuedAtEpochMs = issuedAtEpochMs
+        )
+        val responseSignature = crypto.sign(SIGNING_ALIAS, json.encodeToString(unsignedResponse))
+
+        val responseClaims = ResponseClaims(
+            sessionId = claims.sessionId,
+            targetUserId = targetUser.userId,
+            targetDeviceId = targetDeviceId,
+            targetSigningPublicKeyB64 = crypto.exportPublicKey(SIGNING_ALIAS),
+            trustScore = score.total,
+            decision = policy.decision.name,
+            exposure = policy.exposure.name,
+            locationJson = locationJson,
+            reason = policy.rationale,
+            issuedAtEpochMs = issuedAtEpochMs,
+            signatureB64 = responseSignature
+        )
+
+        val plainResponse = json.encodeToString(responseClaims)
+        val encryptedResponse = crypto.hybridEncrypt(
+            pairedRequester.encryptionPublicKeyB64,
+            plainResponse,
+            targetDeviceId,
+            pairedRequester.deviceId
+        )
+
+        OutgoingResponse(
+            sessionId = claims.sessionId,
+            requesterUserId = pairedRequester.userId,
+            requesterDeviceId = pairedRequester.deviceId,
+            payload = json.encodeToString(encryptedResponse)
+        )
+    }
+    override suspend fun processIncomingResponse(responsePayload: String): Result<LocationAccessResult> = runCatching {
+        val envelope = json.decodeFromString<HybridEncryptedEnvelope>(responsePayload)
+        val plain = crypto.hybridDecrypt(ENCRYPTION_ALIAS, envelope)
+        val claims = json.decodeFromString<ResponseClaims>(plain)
+        val requesterUser = requireNotNull(store.getUser()) { "Requester user not initialized" }
+        val requesterDeviceId = requireNotNull(requesterUser.deviceId) { "Requester device not initialized" }
+
+        check(envelope.recipientDeviceId == requesterDeviceId) {
+            "Incoming response is not addressed to this device"
+        }
+        check(envelope.senderDeviceId == claims.targetDeviceId) {
+            "Incoming response sender device mismatch"
+        }
+
+        val pairedTarget: PairedDevice = store.getPairedDevice(claims.targetDeviceId)
+            ?: error("Target device is not paired")
+        check(pairedTarget.signingPublicKeyB64 == claims.targetSigningPublicKeyB64) {
+            "Incoming response signing key does not match paired device"
+        }
+
+
+        val unsignedResponse = UnsignedResponseClaims(
+            sessionId = claims.sessionId,
+            targetUserId = claims.targetUserId,
+            targetDeviceId = claims.targetDeviceId,
+            targetSigningPublicKeyB64 = claims.targetSigningPublicKeyB64,
+            trustScore = claims.trustScore,
+            decision = claims.decision,
+            exposure = claims.exposure,
+            locationJson = claims.locationJson,
+            reason = claims.reason,
+            issuedAtEpochMs = claims.issuedAtEpochMs
+        )
+
+        check(crypto.verify(pairedTarget.signingPublicKeyB64, json.encodeToString(unsignedResponse), claims.signatureB64)) {
+            "Incoming response signature invalid"
+        }
+
+        val locationPayload = claims.locationJson?.takeIf { it.isNotBlank() }?.let {
+            json.decodeFromString<LocationPayload>(it)
+        }
+
+        val result = LocationAccessResult(
+            sessionId = claims.sessionId,
+            decision = AccessDecision.valueOf(claims.decision),
+            trustScore = claims.trustScore,
+            exposure = LocationExposure.valueOf(claims.exposure),
+            locationPayload = locationPayload,
+            reason = claims.reason
+        )
+
+        store.putSession(SessionRecord(claims.sessionId, requireNotNull(store.getUser()).userId, claims.targetUserId, claims.issuedAtEpochMs, claims.trustScore, claims.decision))
+        result
+    }
     override suspend fun reevaluateSession(sessionId: String): Result<LocationAccessResult> = runCatching {
         val session = requireNotNull(store.getSession(sessionId)) { "Session not found" }
         val user = requireNotNull(store.getUser()) { "User not initialized" }
         val posture = devicePostureCollector.collect(isRegistered = user.deviceId != null)
         val contextSignals = contextSignalsCollector.collect(session.issuedAtEpochMs)
-        val behaviorSignals = behaviorMonitor.collect(recentFailures = 0, recentBurstRequests = 0)
-        val inputs = TrustInputs(
-            identityAuthenticated = true,
-            multiFactorSatisfied = true,
-            devicePosture = posture,
-            contextSignals = contextSignals,
-            behaviorSignals = behaviorSignals
-        )
+        val behaviorSignals = behaviorMonitor.collect()
+        val inputs = TrustInputs(true, true, posture, contextSignals, behaviorSignals)
         val score = trustScoreEngine.calculate(inputs)
-        val policy = policyEvaluator.evaluate(score.total)
+        val policy = policyEvaluator.evaluate(score)
         val result = LocationAccessResult(
             sessionId = sessionId,
             decision = policy.decision,
@@ -224,4 +329,10 @@ class DefaultZtaLocationClient(
         store.putSession(session.copy(lastTrustScore = score.total, lastDecision = policy.decision.name))
         result
     }
+
+    private suspend fun clearLocalUserState() {
+        store.remove("user")
+    }
+
+    private fun processedRequestKey(sessionId: String): String = "processed_request:$sessionId"
 }
