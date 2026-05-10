@@ -10,7 +10,9 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-class LocationTransformer {
+class LocationTransformer(
+    private val approximateMaxOffsetKm: Double = 20.0
+) {
     private val random = SecureRandom()
 
     fun transform(
@@ -47,13 +49,17 @@ class LocationTransformer {
         return LocationPayload(
             latitude = (location.latitude + latitudeOffsetDegrees).coerceIn(-90.0, 90.0),
             longitude = normalizeLongitude(location.longitude + longitudeOffsetDegrees),
-            radiusMeters = APPROXIMATE_RADIUS_METERS,
+            radiusMeters = approximateRadiusMeters(),
             timestampEpochMs = location.timestampEpochMs
         )
     }
 
     private fun randomOffsetKm(): Double {
-        return (random.nextDouble() * 2.0 - 1.0) * APPROXIMATE_MAX_OFFSET_KM
+        return (random.nextDouble() * 2.0 - 1.0) * approximateMaxOffsetKm
+    }
+
+    private fun approximateRadiusMeters(): Double {
+        return sqrt(2.0) * approximateMaxOffsetKm * 1000.0
     }
 
     private fun inferSemanticLabel(
@@ -85,8 +91,6 @@ class LocationTransformer {
     }
 
     companion object {
-        private const val APPROXIMATE_MAX_OFFSET_KM = 20.0
-        private val APPROXIMATE_RADIUS_METERS = sqrt(2.0) * APPROXIMATE_MAX_OFFSET_KM * 1000.0
         private const val KM_PER_LATITUDE_DEGREE = 111.32
         private const val EARTH_RADIUS_METERS = 6_371_000.0
         private const val UNKNOWN_SEMANTIC_LABEL = "unknown_area"

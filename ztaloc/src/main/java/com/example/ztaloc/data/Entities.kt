@@ -19,7 +19,10 @@ data class SessionRecord(
     val targetUserId: String,
     val issuedAtEpochMs: Long,
     val lastTrustScore: Int,
-    val lastDecision: String
+    val lastDecision: String,
+    val locationLatitude: Double? = null,
+    val locationLongitude: Double? = null,
+    val locationTimestampEpochMs: Long? = null
 )
 
 @Serializable

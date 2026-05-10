@@ -9,14 +9,15 @@ import java.time.ZoneId
 class ContextSignalsCollector(
     private val context: Context,
     private val knownHoursStart: Int = 6,
-    private val knownHoursEnd: Int = 23
+    private val knownHoursEnd: Int = 23,
+    private val requestFreshnessMs: Long = 60_000L
 ) {
     fun collect(requestEpochMs: Long): ContextSignals {
         val notes = mutableListOf<String>()
         val nowHour = Instant.ofEpochMilli(System.currentTimeMillis()).atZone(ZoneId.systemDefault()).hour
         val withinHours = nowHour in knownHoursStart..knownHoursEnd
         if (!withinHours) notes += "Request outside expected hours"
-        val freshness = (System.currentTimeMillis() - requestEpochMs) <= 60_000L
+        val freshness = (System.currentTimeMillis() - requestEpochMs) <= requestFreshnessMs
         if (!freshness) notes += "Request too old"
         val trustedNetwork = isTrustedNetwork()
         if (!trustedNetwork) notes += "Untrusted or unknown network"

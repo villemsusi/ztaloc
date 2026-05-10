@@ -1,7 +1,9 @@
 package com.example.ztaloc.core
 
+import android.app.Activity
 import android.content.Context
 import com.example.ztaloc.api.*
+import com.example.ztaloc.auth.DeviceAuthenticator
 import com.example.ztaloc.behavior.BehaviorMonitor
 import com.example.ztaloc.context.ContextSignalsCollector
 import com.example.ztaloc.crypto.HybridEncryptedEnvelope
@@ -24,23 +26,34 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
 class DefaultZtaLocationClient(
-    private val context: Context
+    private val context: Context,
+    private val config: ZtaConfig = ZtaConfig()
 ) : ZtaLocationClient {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-    private val store = LocalStore(context)
+    private val store = LocalStore(context, config.semanticLabelRadiusMeters)
     private val crypto = TransportCrypto()
     private val devicePostureCollector = DevicePostureCollector(context)
-    private val contextSignalsCollector = ContextSignalsCollector(context)
+    private val contextSignalsCollector = ContextSignalsCollector(
+        context = context,
+        knownHoursStart = config.knownHoursStart,
+        knownHoursEnd = config.knownHoursEnd,
+        requestFreshnessMs = config.requestFreshnessMs
+    )
     private val behaviorMonitor = BehaviorMonitor()
     private val trustScoreEngine = TrustScoreEngine()
-    private val policyEvaluator = PolicyEvaluator()
+    private val policyEvaluator = PolicyEvaluator(
+        preciseThreshold = config.preciseThreshold,
+        approximateThreshold = config.approximateThreshold,
+        semanticThreshold = config.semanticThreshold,
+        minimumCategoryScore = config.minimumCategoryScore
+    )
     private val locationProvider = LocationProvider(context)
-    private val transformer = LocationTransformer()
+    private val transformer = LocationTransformer(config.approximateMaxOffsetKm)
+    private val deviceAuthenticator = DeviceAuthenticator()
 
     companion object {
         private const val SIGNING_ALIAS = "zta_signing"
         private const val ENCRYPTION_ALIAS = "zta_encryption"
-        private const val REQUEST_MAX_AGE_MS = 60_000L
     }
 
     override suspend fun setupUser(userId: String, displayName: String?): Result<SetupResult> = runCatching {
@@ -114,18 +127,30 @@ class DefaultZtaLocationClient(
         store.getSemanticLocationLabels()
     }
 
-    override suspend fun createLocationRequest(target: PairedDevice): Result<OutgoingRequest> = runCatching {
+    override suspend fun createLocationRequest(target: PairedDevice, activity: Activity): Result<OutgoingRequest> {
+        val authentication = deviceAuthenticator.authenticateForLocationRequest(activity)
+        return createLocationRequest(target, authentication)
+    }
+
+    private suspend fun createLocationRequest(
+        target: PairedDevice,
+        authentication: LocalAuthenticationResult
+    ): Result<OutgoingRequest> = runCatching {
+        check(authentication.authenticated) {
+            "Location request was not authenticated: ${authentication.reason}"
+        }
+
         val user = requireNotNull(store.getUser()) { "User not initialized" }
         val deviceId = requireNotNull(user.deviceId) { "Device not initialized" }
         val sessionId = java.util.UUID.randomUUID().toString()
         val requestEpochMs = System.currentTimeMillis()
 
         val requesterTrustInputs = TrustInputs(
-            identityAuthenticated = true,
-            multiFactorSatisfied = true,
+            identityAuthenticated = authentication.authenticated,
+            multiFactorSatisfied = authentication.multiFactorSatisfied,
             devicePosture = devicePostureCollector.collect(isRegistered = true),
             contextSignals = contextSignalsCollector.collect(requestEpochMs),
-            behaviorSignals = behaviorMonitor.collect()
+            behaviorSignals = behaviorMonitor.collect(store.getSessions(), requestEpochMs)
         )
         val unsignedClaims = UnsignedRequestClaims(
             sessionId = sessionId,
@@ -175,7 +200,7 @@ class DefaultZtaLocationClient(
         check(envelope.senderDeviceId == claims.requesterDeviceId) {
             "Incoming request sender device mismatch"
         }
-        check(System.currentTimeMillis() - claims.requestEpochMs <= REQUEST_MAX_AGE_MS) {
+        check(System.currentTimeMillis() - claims.requestEpochMs <= config.requestFreshnessMs) {
             "Incoming request is no longer fresh"
         }
         check(store.getString(processedRequestKey(claims.sessionId)) == null) {
@@ -201,6 +226,7 @@ class DefaultZtaLocationClient(
         check(crypto.verify(pairedRequester.signingPublicKeyB64, json.encodeToString(unsignedClaims), claims.signatureB64)) {
             "Incoming request signature invalid"
         }
+
         store.putString(processedRequestKey(claims.sessionId), System.currentTimeMillis().toString())
 
         val score = trustScoreEngine.calculate(claims.requesterTrustInputs)
@@ -252,6 +278,10 @@ class DefaultZtaLocationClient(
             sessionId = claims.sessionId,
             requesterUserId = pairedRequester.userId,
             requesterDeviceId = pairedRequester.deviceId,
+            decision = policy.decision,
+            exposure = policy.exposure,
+            trustScore = score.total,
+            reason = policy.rationale,
             payload = json.encodeToString(encryptedResponse)
         )
     }
@@ -306,27 +336,19 @@ class DefaultZtaLocationClient(
             reason = claims.reason
         )
 
-        store.putSession(SessionRecord(claims.sessionId, requireNotNull(store.getUser()).userId, claims.targetUserId, claims.issuedAtEpochMs, claims.trustScore, claims.decision))
-        result
-    }
-    override suspend fun reevaluateSession(sessionId: String): Result<LocationAccessResult> = runCatching {
-        val session = requireNotNull(store.getSession(sessionId)) { "Session not found" }
-        val user = requireNotNull(store.getUser()) { "User not initialized" }
-        val posture = devicePostureCollector.collect(isRegistered = user.deviceId != null)
-        val contextSignals = contextSignalsCollector.collect(session.issuedAtEpochMs)
-        val behaviorSignals = behaviorMonitor.collect()
-        val inputs = TrustInputs(true, true, posture, contextSignals, behaviorSignals)
-        val score = trustScoreEngine.calculate(inputs)
-        val policy = policyEvaluator.evaluate(score)
-        val result = LocationAccessResult(
-            sessionId = sessionId,
-            decision = policy.decision,
-            trustScore = score.total,
-            exposure = policy.exposure,
-            locationPayload = null,
-            reason = "Re-evaluated during active session"
+        store.putSession(
+            SessionRecord(
+                sessionId = claims.sessionId,
+                requesterUserId = requireNotNull(store.getUser()).userId,
+                targetUserId = claims.targetUserId,
+                issuedAtEpochMs = claims.issuedAtEpochMs,
+                lastTrustScore = claims.trustScore,
+                lastDecision = claims.decision,
+                locationLatitude = locationPayload?.latitude,
+                locationLongitude = locationPayload?.longitude,
+                locationTimestampEpochMs = locationPayload?.timestampEpochMs
+            )
         )
-        store.putSession(session.copy(lastTrustScore = score.total, lastDecision = policy.decision.name))
         result
     }
 

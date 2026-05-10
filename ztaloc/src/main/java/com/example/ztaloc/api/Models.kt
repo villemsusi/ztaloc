@@ -51,6 +51,10 @@ data class OutgoingResponse(
     val sessionId: String,
     val requesterUserId: String,
     val requesterDeviceId: String,
+    val decision: AccessDecision,
+    val exposure: LocationExposure,
+    val trustScore: Int,
+    val reason: String,
     val payload: String
 )
 
@@ -61,6 +65,12 @@ data class LocationAccessResult(
     val trustScore: Int,
     val exposure: LocationExposure,
     val locationPayload: LocationPayload?,
+    val reason: String
+)
+
+data class LocalAuthenticationResult(
+    val authenticated: Boolean,
+    val multiFactorSatisfied: Boolean,
     val reason: String
 )
 

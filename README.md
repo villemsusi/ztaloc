@@ -28,14 +28,31 @@ Call once from your `Application.onCreate()`:
 
 ```kotlin
 import com.example.ztaloc.api.ZtaObj
+import com.example.ztaloc.core.ZtaConfig
 
 class MyApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        ZtaObj.initialize(applicationContext)
+        ZtaObj.initialize(
+            applicationContext,
+            ZtaConfig(
+                knownHoursStart = 6,
+                knownHoursEnd = 23,
+                preciseThreshold = 81,
+                approximateThreshold = 70,
+                semanticThreshold = 60,
+                minimumCategoryScore = 10,
+                approximateMaxOffsetKm = 20.0,
+                semanticLabelRadiusMeters = 100.0
+            )
+        )
     }
 }
 ```
+
+All `ZtaConfig` values are optional. Use them when your app needs different
+policy thresholds, expected request hours, request freshness, approximate
+location radius, or semantic label radius.
 
 ## 3. Set Up the Local User
 
@@ -113,11 +130,14 @@ Requester device:
 
 ```kotlin
 val target = ZtaObj.listPairedDevices().getOrThrow().first()
-val request = ZtaObj.createLocationRequest(target).getOrThrow()
+val request = ZtaObj.createLocationRequest(target, activity).getOrThrow()
 ```
 
 Send `request.payload` to the target device through your backend or relay.
 The payload is already signed and encrypted by the SDK.
+The Activity-based overload prompts the requester with Android's device
+credential UI, using the user's configured PIN, password, pattern, or biometric.
+If local authentication fails, no request is created.
 
 ## 7. Process a Request
 
@@ -129,6 +149,10 @@ val response = ZtaObj.processIncomingRequest(requestPayload).getOrThrow()
 
 Send `response.payload` back to the requester through your backend or relay.
 The response is signed and encrypted by the SDK.
+The target does not manually approve the request. The SDK verifies the request,
+evaluates the policy, and returns the enforced `decision`, `exposure`,
+`trustScore`, and `reason` on `OutgoingResponse` so the wrapping application can
+notify the target user about the request and policy outcome.
 
 ## 8. Process a Response
 
@@ -149,7 +173,7 @@ val result = ZtaObj.processIncomingResponse(responsePayload).getOrThrow()
 
 Your app must provide:
 
-- User authentication and account management.
+- Account management and any server-side user authentication.
 - Android location permission requests.
 - QR or other pairing UI.
 - Backend/relay delivery for encrypted request and response payloads.
@@ -157,6 +181,8 @@ Your app must provide:
 
 The SDK does not currently provide its own relay client, QR scanner, account
 system, or UI.
+For request-time Zero Trust checks, prefer the Activity-based request methods so
+the SDK can use Android's local credential prompt as part of the policy flow.
 
 ## 10. Notes
 

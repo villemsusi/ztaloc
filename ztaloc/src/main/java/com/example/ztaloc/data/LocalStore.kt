@@ -14,7 +14,10 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 private val Context.ztaDataStore by preferencesDataStore(name = "zta_store")
 
-class LocalStore(private val context: Context) {
+class LocalStore(
+    private val context: Context,
+    private val semanticLabelRadiusMeters: Double = 100.0
+) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     suspend fun saveUser(user: LocalUser) {
@@ -34,6 +37,14 @@ class LocalStore(private val context: Context) {
         val raw = context.ztaDataStore.data.first()[sessionKey(sessionId)] ?: return null
         return runCatching { json.decodeFromString<SessionRecord>(raw) }.getOrNull()
     }
+
+    suspend fun getSessions(): List<SessionRecord> {
+        return context.ztaDataStore.data.first().asMap()
+            .filterKeys { it.name.startsWith(SESSION_PREFIX) }
+            .values
+            .mapNotNull { raw -> runCatching { json.decodeFromString<SessionRecord>(raw.toString()) }.getOrNull() }
+    }
+
     suspend fun putString(key: String, value: String) {
         context.ztaDataStore.edit { prefs -> prefs[stringPreferencesKey(key)] = value }
     }
@@ -77,7 +88,7 @@ class LocalStore(private val context: Context) {
     suspend fun upsertSemanticLocationLabel(label: SemanticLocationLabel) {
         val normalized = label.copy(
             label = label.label.trim(),
-            radiusMeters = SEMANTIC_LABEL_RADIUS_METERS
+            radiusMeters = semanticLabelRadiusMeters
         )
         require(normalized.label.isNotBlank()) { "Semantic location label must not be blank" }
         require(normalized.latitude in -90.0..90.0) { "Semantic location latitude must be between -90 and 90" }
@@ -103,12 +114,12 @@ class LocalStore(private val context: Context) {
 
     fun newDeviceId(): String = UUID.randomUUID().toString()
 
-    private fun sessionKey(sessionId: String): Preferences.Key<String> = stringPreferencesKey("session:$sessionId")
+    private fun sessionKey(sessionId: String): Preferences.Key<String> = stringPreferencesKey("$SESSION_PREFIX$sessionId")
 
     companion object {
+        private const val SESSION_PREFIX = "session:"
         private val USER_KEY = stringPreferencesKey("user")
         private val PAIRED_DEVICES_KEY = stringPreferencesKey("paired_devices")
         private val SEMANTIC_LABELS_KEY = stringPreferencesKey("semantic_location_labels")
-        private const val SEMANTIC_LABEL_RADIUS_METERS = 100.0
     }
 }

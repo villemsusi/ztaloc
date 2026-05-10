@@ -1,17 +1,19 @@
 package com.example.ztaloc.api
 
+import android.app.Activity
 import android.content.Context
 import com.example.ztaloc.core.DefaultZtaLocationClient
+import com.example.ztaloc.core.ZtaConfig
 
 object ZtaObj {
     @Volatile
     private var client: ZtaLocationClient? = null
 
-    fun initialize(context: Context) {
+    fun initialize(context: Context, config: ZtaConfig = ZtaConfig()) {
         if (client == null) {
             synchronized(this) {
                 if (client == null) {
-                    client = DefaultZtaLocationClient(context.applicationContext)
+                    client = DefaultZtaLocationClient(context.applicationContext, config)
                 }
             }
         }
@@ -49,15 +51,12 @@ object ZtaObj {
     suspend fun listSemanticLocationLabels(): Result<List<SemanticLocationLabel>> =
         requireClient().listSemanticLocationLabels()
 
-    suspend fun createLocationRequest(target: PairedDevice): Result<OutgoingRequest> =
-        requireClient().createLocationRequest(target)
+    suspend fun createLocationRequest(target: PairedDevice, activity: Activity): Result<OutgoingRequest> =
+        requireClient().createLocationRequest(target, activity)
 
     suspend fun processIncomingRequest(requestPayload: String): Result<OutgoingResponse> =
         requireClient().processIncomingRequest(requestPayload)
 
     suspend fun processIncomingResponse(responsePayload: String): Result<LocationAccessResult> =
         requireClient().processIncomingResponse(responsePayload)
-
-    suspend fun reevaluateSession(sessionId: String): Result<LocationAccessResult> =
-        requireClient().reevaluateSession(sessionId)
 }
