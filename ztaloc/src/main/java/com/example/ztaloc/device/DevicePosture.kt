@@ -9,6 +9,9 @@ data class DevicePosture(
     val osVersionRecentEnough: Boolean,
     val secureLockEnabled: Boolean,
     val hardwareBackedKeysAvailable: Boolean,
+    val applicationChecksumMatches: Boolean,
+    val applicationChecksumSha256: String?,
+    val expectedApplicationChecksumSha256: String?,
     val rootOrJailbreakSuspected: Boolean,
     val rationale: List<String>
 )

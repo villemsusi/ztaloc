@@ -35,7 +35,11 @@ class DefaultZtaLocationClient(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val store = LocalStore(context)
     private val crypto = TransportCrypto()
-    private val devicePostureCollector = DevicePostureCollector(context)
+    private val devicePostureCollector = DevicePostureCollector(
+        context = context,
+        expectedPackageName = config.appPackageName,
+        expectedApplicationChecksumSha256 = config.applicationChecksumSha256
+    )
     private val contextSignalsCollector = ContextSignalsCollector(
         context = context,
         knownHoursStart = config.knownHoursStart,
@@ -50,6 +54,7 @@ class DefaultZtaLocationClient(
         osVersionPoints = trustSignalPoints.osVersion,
         hardwareBackedKeysPoints = trustSignalPoints.hardwareBackedKeys,
         secureLockPoints = trustSignalPoints.secureLock,
+        applicationChecksumPoints = trustSignalPoints.applicationChecksum,
         trustedNetworkPoints = trustSignalPoints.trustedNetwork,
         expectedHoursPoints = trustSignalPoints.expectedHours,
         requestFreshnessPoints = trustSignalPoints.requestFreshness,

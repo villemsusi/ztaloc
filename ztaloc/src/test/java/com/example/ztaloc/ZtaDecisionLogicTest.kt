@@ -122,6 +122,18 @@ class ZtaDecisionLogicTest {
     }
 
     @Test
+    fun policyDeniesRootedUnregisteredOrChecksumMismatchRegardlessOfScore() {
+        val policyEvaluator = PolicyEvaluator()
+        val rooted = policyEvaluator.evaluate(trustedScore(trustedDevicePosture().copy(rootOrJailbreakSuspected = true)))
+        val unregistered = policyEvaluator.evaluate(trustedScore(trustedDevicePosture().copy(isRegistered = false)))
+        val checksumMismatch = policyEvaluator.evaluate(trustedScore(trustedDevicePosture().copy(applicationChecksumMatches = false)))
+
+        assertEquals(AccessDecision.DENY, rooted.decision)
+        assertEquals(AccessDecision.DENY, unregistered.decision)
+        assertEquals(AccessDecision.DENY, checksumMismatch.decision)
+    }
+
+    @Test
     fun policyThresholdsAreConfigurable() {
         val policy = PolicyEvaluator(
             preciseThreshold = 100,
@@ -178,6 +190,9 @@ class ZtaDecisionLogicTest {
             osVersionRecentEnough = true,
             secureLockEnabled = true,
             hardwareBackedKeysAvailable = true,
+            applicationChecksumMatches = true,
+            applicationChecksumSha256 = "AA",
+            expectedApplicationChecksumSha256 = "AA",
             rootOrJailbreakSuspected = false,
             rationale = emptyList()
         )
@@ -210,6 +225,7 @@ class ZtaDecisionLogicTest {
             osVersionPoints = points.osVersion,
             hardwareBackedKeysPoints = points.hardwareBackedKeys,
             secureLockPoints = points.secureLock,
+            applicationChecksumPoints = points.applicationChecksum,
             trustedNetworkPoints = points.trustedNetwork,
             expectedHoursPoints = points.expectedHours,
             requestFreshnessPoints = points.requestFreshness,
@@ -219,4 +235,16 @@ class ZtaDecisionLogicTest {
             trustRecencyPoints = points.trustRecency
         )
     }
+
+    private fun trustedScore(devicePosture: DevicePosture) =
+        trustScoreEngine().calculate(
+            TrustInputs(
+                identityAuthenticated = true,
+                multiFactorSatisfied = true,
+                devicePosture = devicePosture,
+                contextSignals = trustedContextSignals(),
+                behaviorSignals = BehaviorMonitor().collect(),
+                trustRecencySignals = trustedRecencySignals()
+            )
+        )
 }

@@ -16,6 +16,15 @@ class PolicyEvaluator(
         if (!score.multiFactorSatisfied) {
             return PolicyResult(AccessDecision.REQUIRE_STEP_UP, LocationExposure.NONE, "Additional verification required")
         }
+        if (!score.registeredDevice) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Device is not registered")
+        }
+        if (score.rootOrJailbreakSuspected) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Rooted or compromised OS detected")
+        }
+        if (!score.applicationChecksumMatches) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Application checksum mismatch")
+        }
         if (
             score.device < requiredCategoryScore(score.deviceMax) ||
             score.context < requiredCategoryScore(score.contextMax) ||

@@ -6,6 +6,7 @@ class TrustScoreEngine(
     private val osVersionPoints: Double,
     private val hardwareBackedKeysPoints: Double,
     private val secureLockPoints: Double,
+    private val applicationChecksumPoints: Double,
     private val trustedNetworkPoints: Double,
     private val expectedHoursPoints: Double,
     private val requestFreshnessPoints: Double,
@@ -21,6 +22,7 @@ class TrustScoreEngine(
         if (inputs.devicePosture.osVersionRecentEnough) device += osVersionPoints
         if (inputs.devicePosture.hardwareBackedKeysAvailable) device += hardwareBackedKeysPoints
         if (inputs.devicePosture.secureLockEnabled) device += secureLockPoints
+        if (inputs.devicePosture.applicationChecksumMatches) device += applicationChecksumPoints
 
         var context = 0.0
         if (inputs.contextSignals.trustedNetwork) context += trustedNetworkPoints
@@ -39,11 +41,14 @@ class TrustScoreEngine(
             total = total.toInt(),
             identityAuthenticated = inputs.identityAuthenticated,
             multiFactorSatisfied = inputs.multiFactorSatisfied,
+            registeredDevice = inputs.devicePosture.isRegistered,
+            rootOrJailbreakSuspected = inputs.devicePosture.rootOrJailbreakSuspected,
+            applicationChecksumMatches = inputs.devicePosture.applicationChecksumMatches,
             device = device,
             context = context,
             behavior = behavior,
             trustRecency = trustRecency,
-            deviceMax = registeredDevicePoints + deviceIntegrityPoints + osVersionPoints + hardwareBackedKeysPoints + secureLockPoints,
+            deviceMax = registeredDevicePoints + deviceIntegrityPoints + osVersionPoints + hardwareBackedKeysPoints + secureLockPoints + applicationChecksumPoints,
             contextMax = trustedNetworkPoints + expectedHoursPoints + requestFreshnessPoints,
             behaviorMax = normalRequestRatePoints + noRepeatedFailuresPoints + plausibleMovementPoints,
             trustRecencyMax = trustRecencyPoints
@@ -55,6 +60,9 @@ data class TrustScoreResult(
     val total: Int,
     val identityAuthenticated: Boolean,
     val multiFactorSatisfied: Boolean,
+    val registeredDevice: Boolean,
+    val rootOrJailbreakSuspected: Boolean,
+    val applicationChecksumMatches: Boolean,
     val device: Double,
     val context: Double,
     val behavior: Double,
