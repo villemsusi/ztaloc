@@ -33,8 +33,11 @@ object ZtaObj {
     suspend fun getDeviceRegistrationInfo(): Result<DeviceRegistrationInfo> =
         requireClient().getDeviceRegistrationInfo()
 
-    suspend fun upsertPairedDevice(device: PairedDevice): Result<Unit> =
-        requireClient().upsertPairedDevice(device)
+    suspend fun upsertPairedDevice(device: PairedDevice, expectedPairingFingerprint: String): Result<Unit> =
+        requireClient().upsertPairedDevice(device, expectedPairingFingerprint)
+
+    suspend fun pairingFingerprint(device: PairedDevice): Result<String> =
+        requireClient().pairingFingerprint(device)
 
     suspend fun removePairedDevice(deviceId: String): Result<Unit> =
         requireClient().removePairedDevice(deviceId)
@@ -42,8 +45,13 @@ object ZtaObj {
     suspend fun listPairedDevices(): Result<List<PairedDevice>> =
         requireClient().listPairedDevices()
 
-    suspend fun upsertSemanticLocationLabel(label: String, latitude: Double, longitude: Double): Result<Unit> =
-        requireClient().upsertSemanticLocationLabel(label, latitude, longitude)
+    suspend fun upsertSemanticLocationLabel(
+        label: String,
+        latitude: Double,
+        longitude: Double,
+        radiusMeters: Double? = null
+    ): Result<Unit> =
+        requireClient().upsertSemanticLocationLabel(label, latitude, longitude, radiusMeters)
 
     suspend fun removeSemanticLocationLabel(label: String): Result<Unit> =
         requireClient().removeSemanticLocationLabel(label)
@@ -59,4 +67,10 @@ object ZtaObj {
 
     suspend fun processIncomingResponse(responsePayload: String): Result<LocationAccessResult> =
         requireClient().processIncomingResponse(responsePayload)
+
+    suspend fun encryptPayload(target: PairedDevice, plaintext: String): Result<String> =
+        requireClient().encryptPayload(target, plaintext)
+
+    suspend fun decryptPayload(encryptedPayload: String): Result<String> =
+        requireClient().decryptPayload(encryptedPayload)
 }

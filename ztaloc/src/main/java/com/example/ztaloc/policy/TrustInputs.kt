@@ -11,5 +11,6 @@ data class TrustInputs(
     val multiFactorSatisfied: Boolean,
     val devicePosture: DevicePosture,
     val contextSignals: ContextSignals,
-    val behaviorSignals: BehaviorSignals
+    val behaviorSignals: BehaviorSignals,
+    val trustRecencySignals: TrustRecencySignals
 )

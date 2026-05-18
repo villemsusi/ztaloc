@@ -1,33 +1,52 @@
 package com.example.ztaloc.policy
 
-class TrustScoreEngine {
+class TrustScoreEngine(
+    private val registeredDevicePoints: Double,
+    private val deviceIntegrityPoints: Double,
+    private val osVersionPoints: Double,
+    private val hardwareBackedKeysPoints: Double,
+    private val secureLockPoints: Double,
+    private val trustedNetworkPoints: Double,
+    private val expectedHoursPoints: Double,
+    private val requestFreshnessPoints: Double,
+    private val normalRequestRatePoints: Double,
+    private val noRepeatedFailuresPoints: Double,
+    private val plausibleMovementPoints: Double,
+    private val trustRecencyPoints: Double
+) {
     fun calculate(inputs: TrustInputs): TrustScoreResult {
-        var device = 0
-        if (inputs.devicePosture.isRegistered) device += 15
-        if (inputs.devicePosture.passesIntegrity && !inputs.devicePosture.rootOrJailbreakSuspected) device += 15
-        if (inputs.devicePosture.osVersionRecentEnough) device += 7
-        if (inputs.devicePosture.hardwareBackedKeysAvailable) device += 7
-        if (inputs.devicePosture.secureLockEnabled) device += 6
+        var device = 0.0
+        if (inputs.devicePosture.isRegistered) device += registeredDevicePoints
+        if (inputs.devicePosture.passesIntegrity && !inputs.devicePosture.rootOrJailbreakSuspected) device += deviceIntegrityPoints
+        if (inputs.devicePosture.osVersionRecentEnough) device += osVersionPoints
+        if (inputs.devicePosture.hardwareBackedKeysAvailable) device += hardwareBackedKeysPoints
+        if (inputs.devicePosture.secureLockEnabled) device += secureLockPoints
 
-        var context = 0
-        if (inputs.contextSignals.trustedNetwork) context += 10
-        if (inputs.contextSignals.withinExpectedHours) context += 10
-        if (inputs.contextSignals.requestFresh) context += 10
+        var context = 0.0
+        if (inputs.contextSignals.trustedNetwork) context += trustedNetworkPoints
+        if (inputs.contextSignals.withinExpectedHours) context += expectedHoursPoints
+        if (inputs.contextSignals.requestFresh) context += requestFreshnessPoints
 
-        var behavior = 20
-        if (!inputs.behaviorSignals.normalRequestRate) behavior -= 10
-        if (inputs.behaviorSignals.repeatedFailures) behavior -= 5
-        if (inputs.behaviorSignals.impossibleMovementSuspected) behavior -= 10
-        if (behavior < 0) behavior = 0
+        var behavior = 0.0
+        if (inputs.behaviorSignals.normalRequestRate) behavior += normalRequestRatePoints
+        if (!inputs.behaviorSignals.repeatedFailures) behavior += noRepeatedFailuresPoints
+        if (!inputs.behaviorSignals.impossibleMovementSuspected) behavior += plausibleMovementPoints
 
-        val total = (device + context + behavior).coerceIn(0, 100)
+        val trustRecency = (inputs.trustRecencySignals.rawScore.coerceIn(0, 10) / 10.0) * trustRecencyPoints
+
+        val total = (device + context + behavior + trustRecency).coerceIn(0.0, 100.0)
         return TrustScoreResult(
-            total = total,
+            total = total.toInt(),
             identityAuthenticated = inputs.identityAuthenticated,
             multiFactorSatisfied = inputs.multiFactorSatisfied,
-            device = device.coerceIn(0, 50),
-            context = context.coerceIn(0, 30),
-            behavior = behavior.coerceIn(0, 20)
+            device = device,
+            context = context,
+            behavior = behavior,
+            trustRecency = trustRecency,
+            deviceMax = registeredDevicePoints + deviceIntegrityPoints + osVersionPoints + hardwareBackedKeysPoints + secureLockPoints,
+            contextMax = trustedNetworkPoints + expectedHoursPoints + requestFreshnessPoints,
+            behaviorMax = normalRequestRatePoints + noRepeatedFailuresPoints + plausibleMovementPoints,
+            trustRecencyMax = trustRecencyPoints
         )
     }
 }
@@ -36,7 +55,12 @@ data class TrustScoreResult(
     val total: Int,
     val identityAuthenticated: Boolean,
     val multiFactorSatisfied: Boolean,
-    val device: Int,
-    val context: Int,
-    val behavior: Int
+    val device: Double,
+    val context: Double,
+    val behavior: Double,
+    val trustRecency: Double,
+    val deviceMax: Double,
+    val contextMax: Double,
+    val behaviorMax: Double,
+    val trustRecencyMax: Double
 )

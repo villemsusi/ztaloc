@@ -1,6 +1,8 @@
 package com.example.ztaloc
 
 import com.example.ztaloc.api.AccessDecision
+import com.example.ztaloc.api.LocationExposure
+import com.example.ztaloc.api.SemanticLocationLabel
 import com.example.ztaloc.behavior.BehaviorMonitor
 import com.example.ztaloc.context.ContextSignals
 import com.example.ztaloc.core.ZtaConfig
@@ -11,6 +13,7 @@ import com.example.ztaloc.location.LocationTransformer
 import com.example.ztaloc.location.PreciseLocation
 import com.example.ztaloc.policy.PolicyEvaluator
 import com.example.ztaloc.policy.TrustInputs
+import com.example.ztaloc.policy.TrustRecencySignals
 import com.example.ztaloc.policy.TrustScoreEngine
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertEquals
@@ -83,13 +86,14 @@ class ZtaDecisionLogicTest {
 
     @Test
     fun policyRequiresStepUpWhenLocalAuthenticationIsMissing() {
-        val score = TrustScoreEngine().calculate(
+        val score = trustScoreEngine().calculate(
             TrustInputs(
                 identityAuthenticated = false,
                 multiFactorSatisfied = false,
                 devicePosture = trustedDevicePosture(),
                 contextSignals = trustedContextSignals(),
-                behaviorSignals = BehaviorMonitor().collect()
+                behaviorSignals = BehaviorMonitor().collect(),
+                trustRecencySignals = trustedRecencySignals()
             )
         )
 
@@ -100,13 +104,14 @@ class ZtaDecisionLogicTest {
 
     @Test
     fun policyAllowsPreciseLocationForFullyTrustedInputs() {
-        val score = TrustScoreEngine().calculate(
+        val score = trustScoreEngine().calculate(
             TrustInputs(
                 identityAuthenticated = true,
                 multiFactorSatisfied = true,
                 devicePosture = trustedDevicePosture(),
                 contextSignals = trustedContextSignals(),
-                behaviorSignals = BehaviorMonitor().collect()
+                behaviorSignals = BehaviorMonitor().collect(),
+                trustRecencySignals = trustedRecencySignals()
             )
         )
 
@@ -143,10 +148,27 @@ class ZtaDecisionLogicTest {
     fun approximateLocationRadiusUsesConfiguredOffset() {
         val payload = LocationTransformer(approximateMaxOffsetKm = 5.0).transform(
             location = PreciseLocation(59.4370, 24.7536, 1_700_000_000_000L),
-            exposure = com.example.ztaloc.api.LocationExposure.APPROXIMATE
+            exposure = LocationExposure.APPROXIMATE
         )
 
         assertEquals(7_071.067811865476, payload.radiusMeters ?: 0.0, 0.0001)
+    }
+
+    @Test
+    fun semanticLocationUsesPerLabelRadius() {
+        val location = PreciseLocation(59.4370, 24.7536, 1_700_000_000_000L)
+        val labels = listOf(
+            SemanticLocationLabel("too_small", 59.4379, 24.7536, radiusMeters = 50.0),
+            SemanticLocationLabel("large_enough", 59.4379, 24.7536, radiusMeters = 150.0)
+        )
+
+        val payload = LocationTransformer().transform(
+            location = location,
+            exposure = LocationExposure.SEMANTIC,
+            semanticLabels = labels
+        )
+
+        assertEquals("large_enough", payload.semanticLabel)
     }
 
     private fun trustedDevicePosture(): DevicePosture {
@@ -168,6 +190,33 @@ class ZtaDecisionLogicTest {
             withinExpectedHours = true,
             requestFresh = true,
             notes = emptyList()
+        )
+    }
+
+    private fun trustedRecencySignals(): TrustRecencySignals {
+        return TrustRecencySignals(
+            lastTrustedRequestEpochMs = 1_700_000_000_000L,
+            monthsSinceLastTrustedRequest = 0,
+            rawScore = 10,
+            notes = emptyList()
+        )
+    }
+
+    private fun trustScoreEngine(): TrustScoreEngine {
+        val points = ZtaConfig().resolvedTrustSignalPoints()
+        return TrustScoreEngine(
+            registeredDevicePoints = points.registeredDevice,
+            deviceIntegrityPoints = points.deviceIntegrity,
+            osVersionPoints = points.osVersion,
+            hardwareBackedKeysPoints = points.hardwareBackedKeys,
+            secureLockPoints = points.secureLock,
+            trustedNetworkPoints = points.trustedNetwork,
+            expectedHoursPoints = points.expectedHours,
+            requestFreshnessPoints = points.requestFreshness,
+            normalRequestRatePoints = points.normalRequestRate,
+            noRepeatedFailuresPoints = points.noRepeatedFailures,
+            plausibleMovementPoints = points.plausibleMovement,
+            trustRecencyPoints = points.trustRecency
         )
     }
 }

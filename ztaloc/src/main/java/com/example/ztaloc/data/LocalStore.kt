@@ -15,41 +15,42 @@ import java.util.UUID
 private val Context.ztaDataStore by preferencesDataStore(name = "zta_store")
 
 class LocalStore(
-    private val context: Context,
-    private val semanticLabelRadiusMeters: Double = 100.0
+    private val context: Context
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val storeCodec = EncryptedStoreCodec()
 
     suspend fun saveUser(user: LocalUser) {
-        context.ztaDataStore.edit { prefs -> prefs[USER_KEY] = json.encodeToString(user) }
+        context.ztaDataStore.edit { prefs -> prefs[USER_KEY] = protect(json.encodeToString(user)) }
     }
 
     suspend fun getUser(): LocalUser? {
         val raw = context.ztaDataStore.data.first()[USER_KEY] ?: return null
-        return runCatching { json.decodeFromString<LocalUser>(raw) }.getOrNull()
+        return runCatching { json.decodeFromString<LocalUser>(unprotect(raw)) }.getOrNull()
     }
 
     suspend fun putSession(record: SessionRecord) {
-        context.ztaDataStore.edit { prefs -> prefs[sessionKey(record.sessionId)] = json.encodeToString(record) }
+        context.ztaDataStore.edit { prefs -> prefs[sessionKey(record.sessionId)] = protect(json.encodeToString(record)) }
     }
 
     suspend fun getSession(sessionId: String): SessionRecord? {
         val raw = context.ztaDataStore.data.first()[sessionKey(sessionId)] ?: return null
-        return runCatching { json.decodeFromString<SessionRecord>(raw) }.getOrNull()
+        return runCatching { json.decodeFromString<SessionRecord>(unprotect(raw)) }.getOrNull()
     }
 
     suspend fun getSessions(): List<SessionRecord> {
         return context.ztaDataStore.data.first().asMap()
             .filterKeys { it.name.startsWith(SESSION_PREFIX) }
             .values
-            .mapNotNull { raw -> runCatching { json.decodeFromString<SessionRecord>(raw.toString()) }.getOrNull() }
+            .mapNotNull { raw -> runCatching { json.decodeFromString<SessionRecord>(unprotect(raw.toString())) }.getOrNull() }
     }
 
     suspend fun putString(key: String, value: String) {
-        context.ztaDataStore.edit { prefs -> prefs[stringPreferencesKey(key)] = value }
+        context.ztaDataStore.edit { prefs -> prefs[stringPreferencesKey(key)] = protect(value) }
     }
 
-    suspend fun getString(key: String): String? = context.ztaDataStore.data.first()[stringPreferencesKey(key)]
+    suspend fun getString(key: String): String? =
+        context.ztaDataStore.data.first()[stringPreferencesKey(key)]?.let { unprotect(it) }
 
     suspend fun remove(key: String) {
         context.ztaDataStore.edit { prefs -> prefs.remove(stringPreferencesKey(key)) }
@@ -57,13 +58,13 @@ class LocalStore(
 
     suspend fun getPairedDevices(): List<PairedDevice> {
         val raw = context.ztaDataStore.data.first()[PAIRED_DEVICES_KEY] ?: return emptyList()
-        return runCatching { json.decodeFromString<PairedDeviceList>(raw).devices }.getOrDefault(emptyList())
+        return runCatching { json.decodeFromString<PairedDeviceList>(unprotect(raw)).devices }.getOrDefault(emptyList())
     }
 
     suspend fun upsertPairedDevice(device: PairedDevice) {
         val updated = getPairedDevices().filterNot { it.deviceId == device.deviceId } + device
         context.ztaDataStore.edit { prefs ->
-            prefs[PAIRED_DEVICES_KEY] = json.encodeToString(PairedDeviceList(updated))
+            prefs[PAIRED_DEVICES_KEY] = protect(json.encodeToString(PairedDeviceList(updated)))
         }
     }
 
@@ -73,7 +74,7 @@ class LocalStore(
             if (updated.isEmpty()) {
                 prefs.remove(PAIRED_DEVICES_KEY)
             } else {
-                prefs[PAIRED_DEVICES_KEY] = json.encodeToString(PairedDeviceList(updated))
+                prefs[PAIRED_DEVICES_KEY] = protect(json.encodeToString(PairedDeviceList(updated)))
             }
         }
     }
@@ -82,22 +83,23 @@ class LocalStore(
 
     suspend fun getSemanticLocationLabels(): List<SemanticLocationLabel> {
         val raw = context.ztaDataStore.data.first()[SEMANTIC_LABELS_KEY] ?: return emptyList()
-        return runCatching { json.decodeFromString<SemanticLocationLabelList>(raw).labels }.getOrDefault(emptyList())
+        return runCatching { json.decodeFromString<SemanticLocationLabelList>(unprotect(raw)).labels }.getOrDefault(emptyList())
     }
 
     suspend fun upsertSemanticLocationLabel(label: SemanticLocationLabel) {
         val normalized = label.copy(
             label = label.label.trim(),
-            radiusMeters = semanticLabelRadiusMeters
+            radiusMeters = label.radiusMeters
         )
         require(normalized.label.isNotBlank()) { "Semantic location label must not be blank" }
         require(normalized.latitude in -90.0..90.0) { "Semantic location latitude must be between -90 and 90" }
         require(normalized.longitude in -180.0..180.0) { "Semantic location longitude must be between -180 and 180" }
+        require(normalized.radiusMeters > 0.0) { "Semantic location radius must be greater than 0" }
 
         val updated = getSemanticLocationLabels()
             .filterNot { it.label.equals(normalized.label, ignoreCase = true) } + normalized
         context.ztaDataStore.edit { prefs ->
-            prefs[SEMANTIC_LABELS_KEY] = json.encodeToString(SemanticLocationLabelList(updated))
+            prefs[SEMANTIC_LABELS_KEY] = protect(json.encodeToString(SemanticLocationLabelList(updated)))
         }
     }
 
@@ -107,7 +109,7 @@ class LocalStore(
             if (updated.isEmpty()) {
                 prefs.remove(SEMANTIC_LABELS_KEY)
             } else {
-                prefs[SEMANTIC_LABELS_KEY] = json.encodeToString(SemanticLocationLabelList(updated))
+                prefs[SEMANTIC_LABELS_KEY] = protect(json.encodeToString(SemanticLocationLabelList(updated)))
             }
         }
     }
@@ -115,6 +117,10 @@ class LocalStore(
     fun newDeviceId(): String = UUID.randomUUID().toString()
 
     private fun sessionKey(sessionId: String): Preferences.Key<String> = stringPreferencesKey("$SESSION_PREFIX$sessionId")
+
+    private fun protect(value: String): String = storeCodec.encode(value)
+
+    private fun unprotect(value: String): String = storeCodec.decode(value)
 
     companion object {
         private const val SESSION_PREFIX = "session:"

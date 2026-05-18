@@ -38,9 +38,9 @@ class MyApplication : Application() {
             ZtaConfig(
                 knownHoursStart = 6,
                 knownHoursEnd = 23,
-                preciseThreshold = 81,
-                approximateThreshold = 70,
-                semanticThreshold = 60,
+                preciseThreshold = 90,
+                approximateThreshold = 80,
+                semanticThreshold = 70,
                 minimumCategoryScore = 10,
                 approximateMaxOffsetKm = 20.0,
                 semanticLabelRadiusMeters = 100.0
@@ -52,7 +52,34 @@ class MyApplication : Application() {
 
 All `ZtaConfig` values are optional. Use them when your app needs different
 policy thresholds, expected request hours, request freshness, approximate
-location radius, or semantic label radius.
+location radius, semantic label radius, or trust category weights.
+
+Default policy:
+
+- score below 70: deny
+- fewer than 10 points in any category: deny
+- 70-79: semantic location
+- 80-89: approximate location
+- 90-100: precise location
+
+By default, trust signal point values are adaptive: every unconfigured signal
+gets an equal share of the 100 point budget. If all 12 current signals are used,
+each signal is worth about 8.33 points. Apps may override one or more signal
+point values in `ZtaConfig`; the remaining unconfigured signals share the
+remaining budget equally.
+
+Current trust signals:
+
+- device trust: registered device, device integrity, OS version, hardware-backed
+  keys, secure lock
+- context trust: trusted network, expected hours, request freshness
+- behavior trust: normal request rate, no repeated failures, plausible movement
+- trust recency: time since the last trusted request
+
+Trust recency measures time since the last trusted request with the same paired
+device. It starts at 10 raw points and loses 1 raw point per month. At 10 months
+or older it contributes 0 raw points. If there is no prior trusted request, the
+paired-device timestamp is used as the initial trusted timestamp.
 
 ## 3. Set Up the Local User
 

@@ -54,3 +54,26 @@ data class ResponseClaims(
     val issuedAtEpochMs: Long,
     val signatureB64: String
 )
+
+@Serializable
+data class UnsignedCustomPayloadClaims(
+    val sessionId: String,
+    val senderUserId: String,
+    val senderDeviceId: String,
+    val senderSigningPublicKeyB64: String,
+    val recipientDeviceId: String,
+    val issuedAtEpochMs: Long,
+    val payload: String
+)
+
+@Serializable
+data class CustomPayloadClaims(
+    val sessionId: String,
+    val senderUserId: String,
+    val senderDeviceId: String,
+    val senderSigningPublicKeyB64: String,
+    val recipientDeviceId: String,
+    val issuedAtEpochMs: Long,
+    val payload: String,
+    val signatureB64: String
+)

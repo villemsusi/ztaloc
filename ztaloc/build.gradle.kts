@@ -1,6 +1,9 @@
 import com.android.build.api.dsl.LibraryExtension
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.library")
+    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization") version "2.3.21"
 }
 
@@ -34,6 +37,12 @@ extensions.configure<LibraryExtension>("android") {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
+    }
+}
+
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
@@ -43,6 +52,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.3.2")
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
 
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 }

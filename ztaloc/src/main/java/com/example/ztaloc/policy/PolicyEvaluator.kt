@@ -4,9 +4,9 @@ import com.example.ztaloc.api.AccessDecision
 import com.example.ztaloc.api.LocationExposure
 
 class PolicyEvaluator(
-    private val preciseThreshold: Int = 81,
-    private val approximateThreshold: Int = 70,
-    private val semanticThreshold: Int = 60,
+    private val preciseThreshold: Int = 90,
+    private val approximateThreshold: Int = 80,
+    private val semanticThreshold: Int = 70,
     private val minimumCategoryScore: Int = 10
 ) {
     fun evaluate(score: TrustScoreResult): PolicyResult {
@@ -16,7 +16,12 @@ class PolicyEvaluator(
         if (!score.multiFactorSatisfied) {
             return PolicyResult(AccessDecision.REQUIRE_STEP_UP, LocationExposure.NONE, "Additional verification required")
         }
-        if (score.device < minimumCategoryScore || score.context < minimumCategoryScore || score.behavior < minimumCategoryScore) {
+        if (
+            score.device < requiredCategoryScore(score.deviceMax) ||
+            score.context < requiredCategoryScore(score.contextMax) ||
+            score.behavior < requiredCategoryScore(score.behaviorMax) ||
+            score.trustRecency < requiredCategoryScore(score.trustRecencyMax)
+        ) {
             return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Minimum trust category score not met")
         }
         return evaluate(score.total)
@@ -29,6 +34,10 @@ class PolicyEvaluator(
             score >= semanticThreshold -> PolicyResult(AccessDecision.ALLOW_SEMANTIC, LocationExposure.SEMANTIC, "Low trust request")
             else -> PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Trust score below minimum threshold")
         }
+    }
+
+    private fun requiredCategoryScore(categoryMax: Double): Double {
+        return minOf(minimumCategoryScore.toDouble(), categoryMax)
     }
 }
 
