@@ -8,6 +8,7 @@ import com.example.ztaloc.behavior.BehaviorMonitor
 import com.example.ztaloc.context.ContextSignalsCollector
 import com.example.ztaloc.crypto.HybridEncryptedEnvelope
 import com.example.ztaloc.crypto.TransportCrypto
+import com.example.ztaloc.data.AuditLogEntry
 import com.example.ztaloc.data.LocalStore
 import com.example.ztaloc.data.LocalUser
 import com.example.ztaloc.data.SessionRecord
@@ -27,6 +28,9 @@ import com.example.ztaloc.protocol.UnsignedResponseClaims
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import android.util.Base64
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 class DefaultZtaLocationClient(
     private val context: Context,
@@ -38,13 +42,18 @@ class DefaultZtaLocationClient(
     private val devicePostureCollector = DevicePostureCollector(
         context = context,
         expectedPackageName = config.appPackageName,
-        expectedApplicationChecksumSha256 = config.applicationChecksumSha256
+        expectedApplicationChecksumSha256 = config.applicationChecksumSha256,
+        requiredPermissions = config.requiredPermissions,
+        allowedPermissions = config.allowedPermissions,
+        enablePlayIntegrityChecks = config.enablePlayIntegrityChecks
     )
     private val contextSignalsCollector = ContextSignalsCollector(
         context = context,
         knownHoursStart = config.knownHoursStart,
         knownHoursEnd = config.knownHoursEnd,
-        requestFreshnessMs = config.requestFreshnessMs
+        requestFreshnessMs = config.requestFreshnessMs,
+        expectedCountryIsoCodes = config.expectedCountryIsoCodes,
+        trustedWifiSsids = config.trustedWifiSsids
     )
     private val behaviorMonitor = BehaviorMonitor()
     private val trustSignalPoints = config.resolvedTrustSignalPoints()
@@ -55,9 +64,11 @@ class DefaultZtaLocationClient(
         hardwareBackedKeysPoints = trustSignalPoints.hardwareBackedKeys,
         secureLockPoints = trustSignalPoints.secureLock,
         applicationChecksumPoints = trustSignalPoints.applicationChecksum,
+        permissionPolicyPoints = trustSignalPoints.permissionPolicy,
         trustedNetworkPoints = trustSignalPoints.trustedNetwork,
         expectedHoursPoints = trustSignalPoints.expectedHours,
         requestFreshnessPoints = trustSignalPoints.requestFreshness,
+        expectedCountryPoints = trustSignalPoints.expectedCountry,
         normalRequestRatePoints = trustSignalPoints.normalRequestRate,
         noRepeatedFailuresPoints = trustSignalPoints.noRepeatedFailures,
         plausibleMovementPoints = trustSignalPoints.plausibleMovement,
@@ -105,6 +116,7 @@ class DefaultZtaLocationClient(
         val deviceId = store.newDeviceId()
         val now = System.currentTimeMillis()
         store.saveUser(LocalUser(userId, displayName, deviceId, now))
+        appendAuditLog("USER_SETUP", userId, deviceId, null, "SUCCESS")
 
         SetupResult(
             userId = userId,
@@ -171,6 +183,24 @@ class DefaultZtaLocationClient(
         store.getSemanticLocationLabels()
     }
 
+    override suspend fun listSecureAuditLog(): Result<List<SecureAuditLogEntry>> = runCatching {
+        store.getAuditLogEntries().map { entry ->
+            SecureAuditLogEntry(
+                sequence = entry.sequence,
+                eventType = entry.eventType,
+                subjectUserId = entry.subjectUserId,
+                subjectDeviceId = entry.subjectDeviceId,
+                sessionId = entry.sessionId,
+                result = entry.result,
+                issuedAtEpochMs = entry.issuedAtEpochMs,
+                metadata = entry.metadata,
+                previousHashB64 = entry.previousHashB64,
+                entryHashB64 = entry.entryHashB64,
+                signatureB64 = entry.signatureB64
+            )
+        }
+    }
+
     override suspend fun createLocationRequest(target: PairedDevice, activity: Activity): Result<OutgoingRequest> {
         val authentication = deviceAuthenticator.authenticateForLocationRequest(activity)
         return createLocationRequest(target, authentication)
@@ -186,6 +216,15 @@ class DefaultZtaLocationClient(
         authentication: LocalAuthenticationResult
     ): Result<OutgoingRequest> = runCatching {
         val timer = WorkflowTimer("createLocationRequest")
+        val existingUser = store.getUser()
+        appendAuditLog(
+            eventType = "AUTHENTICATION_ATTEMPT",
+            subjectUserId = existingUser?.userId,
+            subjectDeviceId = existingUser?.deviceId,
+            sessionId = null,
+            result = if (authentication.authenticated) "SUCCESS" else "FAILURE",
+            metadata = mapOf("reason" to authentication.reason)
+        )
         check(authentication.authenticated) {
             "Location request was not authenticated: ${authentication.reason}"
         }
@@ -252,6 +291,14 @@ class DefaultZtaLocationClient(
             targetDeviceId = target.deviceId,
             payload = payload
         )
+        appendAuditLog(
+            eventType = "LOCATION_REQUEST_CREATED",
+            subjectUserId = user.userId,
+            subjectDeviceId = deviceId,
+            sessionId = sessionId,
+            result = "PENDING",
+            metadata = mapOf("targetDeviceId" to target.deviceId)
+        )
         ZtaTiming.lastCreateLocationRequest = timer.finish()
         request
     }
@@ -313,6 +360,18 @@ class DefaultZtaLocationClient(
         )
         val score = trustScoreEngine.calculate(targetComputedTrustInputs)
         val policy = policyEvaluator.evaluate(score)
+        appendAuditLog(
+            eventType = "POLICY_DECISION",
+            subjectUserId = claims.requesterUserId,
+            subjectDeviceId = claims.requesterDeviceId,
+            sessionId = claims.sessionId,
+            result = policy.decision.name,
+            metadata = mapOf(
+                "trustScore" to score.total.toString(),
+                "exposure" to policy.exposure.name,
+                "reason" to policy.rationale
+            )
+        )
         timer.mark("evaluate_policy")
         val precise = locationProvider.getCurrentPreciseLocation()
         val payload = if (precise != null && policy.exposure != LocationExposure.NONE) {
@@ -384,6 +443,13 @@ class DefaultZtaLocationClient(
             trustScore = score.total,
             reason = policy.rationale,
             payload = json.encodeToString(encryptedResponse)
+        )
+        appendAuditLog(
+            eventType = "LOCATION_RESPONSE_CREATED",
+            subjectUserId = claims.requesterUserId,
+            subjectDeviceId = claims.requesterDeviceId,
+            sessionId = claims.sessionId,
+            result = policy.decision.name
         )
         ZtaTiming.lastProcessIncomingRequest = timer.finish()
         response
@@ -457,6 +523,13 @@ class DefaultZtaLocationClient(
             )
         )
         timer.mark("persist_final_session")
+        appendAuditLog(
+            eventType = "LOCATION_RESPONSE_PROCESSED",
+            subjectUserId = requesterUser.userId,
+            subjectDeviceId = requesterDeviceId,
+            sessionId = claims.sessionId,
+            result = claims.decision
+        )
         ZtaTiming.lastProcessIncomingResponse = timer.finish()
         result
     }
@@ -558,6 +631,81 @@ class DefaultZtaLocationClient(
 
     private fun normalizeFingerprint(value: String): String {
         return value.trim().replace("-", ":").replace(" ", ":")
+    }
+
+    private suspend fun appendAuditLog(
+        eventType: String,
+        subjectUserId: String?,
+        subjectDeviceId: String?,
+        sessionId: String?,
+        result: String,
+        metadata: Map<String, String> = emptyMap()
+    ) {
+        runCatching {
+            val previous = store.getAuditLogEntries().maxByOrNull { it.sequence }
+            val sequence = (previous?.sequence ?: 0L) + 1L
+            val issuedAt = System.currentTimeMillis()
+            val previousHash = previous?.entryHashB64
+            val material = auditMaterial(
+                sequence = sequence,
+                eventType = eventType,
+                subjectUserId = subjectUserId,
+                subjectDeviceId = subjectDeviceId,
+                sessionId = sessionId,
+                result = result,
+                issuedAtEpochMs = issuedAt,
+                metadata = metadata,
+                previousHashB64 = previousHash
+            )
+            val hash = sha256B64(material)
+            val signature = crypto.sign(SIGNING_ALIAS, material)
+            store.appendAuditLogEntry(
+                AuditLogEntry(
+                    sequence = sequence,
+                    eventType = eventType,
+                    subjectUserId = subjectUserId,
+                    subjectDeviceId = subjectDeviceId,
+                    sessionId = sessionId,
+                    result = result,
+                    issuedAtEpochMs = issuedAt,
+                    metadata = metadata,
+                    previousHashB64 = previousHash,
+                    entryHashB64 = hash,
+                    signatureB64 = signature
+                )
+            )
+        }
+    }
+
+    private fun auditMaterial(
+        sequence: Long,
+        eventType: String,
+        subjectUserId: String?,
+        subjectDeviceId: String?,
+        sessionId: String?,
+        result: String,
+        issuedAtEpochMs: Long,
+        metadata: Map<String, String>,
+        previousHashB64: String?
+    ): String {
+        val metadataText = metadata.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" }
+        return listOf(
+            sequence.toString(),
+            eventType,
+            subjectUserId.orEmpty(),
+            subjectDeviceId.orEmpty(),
+            sessionId.orEmpty(),
+            result,
+            issuedAtEpochMs.toString(),
+            metadataText,
+            previousHashB64.orEmpty()
+        ).joinToString("|")
+    }
+
+    private fun sha256B64(value: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray(StandardCharsets.UTF_8))
+        return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
     private fun collectTrustRecency(

@@ -1,5 +1,6 @@
 package com.example.ztaloc.core
 
+import android.Manifest
 import okhttp3.HttpUrl
 
 data class ZtaConfig(
@@ -7,7 +8,26 @@ data class ZtaConfig(
     val appPackageName: String? = null,
     val appVersion: String? = null,
     val applicationChecksumSha256: String? = null,
+    val requiredPermissions: Set<String> = setOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_NETWORK_STATE,
+        Manifest.permission.ACCESS_WIFI_STATE,
+        Manifest.permission.USE_BIOMETRIC
+    ),
+    val allowedPermissions: Set<String> = setOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+        Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+        Manifest.permission.ACCESS_NETWORK_STATE,
+        Manifest.permission.ACCESS_WIFI_STATE,
+        Manifest.permission.USE_BIOMETRIC,
+        Manifest.permission.INTERNET,
+        Manifest.permission.POST_NOTIFICATIONS,
+        Manifest.permission.FOREGROUND_SERVICE,
+        Manifest.permission.FOREGROUND_SERVICE_LOCATION
+    ),
     val trustedWifiSsids: Set<String> = emptySet(),
+    val expectedCountryIsoCodes: Set<String> = emptySet(),
     val knownHoursStart: Int = 6,
     val knownHoursEnd: Int = 23,
     val enablePlayIntegrityChecks: Boolean = true,
@@ -21,9 +41,11 @@ data class ZtaConfig(
     val hardwareBackedKeysPoints: Double? = null,
     val secureLockPoints: Double? = null,
     val applicationChecksumPoints: Double? = null,
+    val permissionPolicyPoints: Double? = null,
     val trustedNetworkPoints: Double? = null,
     val expectedHoursPoints: Double? = null,
     val requestFreshnessPoints: Double? = null,
+    val expectedCountryPoints: Double? = null,
     val normalRequestRatePoints: Double? = null,
     val noRepeatedFailuresPoints: Double? = null,
     val plausibleMovementPoints: Double? = null,
@@ -61,9 +83,11 @@ data class ZtaConfig(
             hardwareBackedKeysPoints,
             secureLockPoints,
             applicationChecksumPoints,
+            permissionPolicyPoints,
             trustedNetworkPoints,
             expectedHoursPoints,
             requestFreshnessPoints,
+            expectedCountryPoints,
             normalRequestRatePoints,
             noRepeatedFailuresPoints,
             plausibleMovementPoints,
@@ -98,9 +122,11 @@ data class ZtaConfig(
             hardwareBackedKeys = resolve(hardwareBackedKeysPoints),
             secureLock = resolve(secureLockPoints),
             applicationChecksum = resolve(applicationChecksumPoints),
+            permissionPolicy = resolve(permissionPolicyPoints),
             trustedNetwork = resolve(trustedNetworkPoints),
             expectedHours = resolve(expectedHoursPoints),
             requestFreshness = resolve(requestFreshnessPoints),
+            expectedCountry = resolve(expectedCountryPoints),
             normalRequestRate = resolve(normalRequestRatePoints),
             noRepeatedFailures = resolve(noRepeatedFailuresPoints),
             plausibleMovement = resolve(plausibleMovementPoints),
@@ -120,9 +146,11 @@ data class TrustSignalPoints(
     val hardwareBackedKeys: Double,
     val secureLock: Double,
     val applicationChecksum: Double,
+    val permissionPolicy: Double,
     val trustedNetwork: Double,
     val expectedHours: Double,
     val requestFreshness: Double,
+    val expectedCountry: Double,
     val normalRequestRate: Double,
     val noRepeatedFailures: Double,
     val plausibleMovement: Double,

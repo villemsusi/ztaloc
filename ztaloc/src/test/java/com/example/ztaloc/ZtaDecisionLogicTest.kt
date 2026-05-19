@@ -134,6 +134,19 @@ class ZtaDecisionLogicTest {
     }
 
     @Test
+    fun permissionPolicyMismatchReducesTrustScore() {
+        val trusted = trustedScore(trustedDevicePosture())
+        val permissionMismatch = trustedScore(
+            trustedDevicePosture().copy(
+                permissionPolicyMatches = false,
+                extraDeclaredPermissions = listOf("android.permission.CAMERA")
+            )
+        )
+
+        assertTrue(permissionMismatch.total < trusted.total)
+    }
+
+    @Test
     fun policyThresholdsAreConfigurable() {
         val policy = PolicyEvaluator(
             preciseThreshold = 100,
@@ -193,6 +206,10 @@ class ZtaDecisionLogicTest {
             applicationChecksumMatches = true,
             applicationChecksumSha256 = "AA",
             expectedApplicationChecksumSha256 = "AA",
+            permissionPolicyMatches = true,
+            missingRequiredPermissions = emptyList(),
+            missingRuntimePermissions = emptyList(),
+            extraDeclaredPermissions = emptyList(),
             rootOrJailbreakSuspected = false,
             rationale = emptyList()
         )
@@ -204,6 +221,8 @@ class ZtaDecisionLogicTest {
             requestHour = 12,
             withinExpectedHours = true,
             requestFresh = true,
+            countryAllowed = true,
+            countryIsoCode = "EE",
             notes = emptyList()
         )
     }
@@ -226,9 +245,11 @@ class ZtaDecisionLogicTest {
             hardwareBackedKeysPoints = points.hardwareBackedKeys,
             secureLockPoints = points.secureLock,
             applicationChecksumPoints = points.applicationChecksum,
+            permissionPolicyPoints = points.permissionPolicy,
             trustedNetworkPoints = points.trustedNetwork,
             expectedHoursPoints = points.expectedHours,
             requestFreshnessPoints = points.requestFreshness,
+            expectedCountryPoints = points.expectedCountry,
             normalRequestRatePoints = points.normalRequestRate,
             noRepeatedFailuresPoints = points.noRepeatedFailures,
             plausibleMovementPoints = points.plausibleMovement,

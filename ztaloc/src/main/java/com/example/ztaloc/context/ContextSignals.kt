@@ -8,5 +8,7 @@ data class ContextSignals(
     val requestHour: Int,
     val withinExpectedHours: Boolean,
     val requestFresh: Boolean,
+    val countryAllowed: Boolean = true,
+    val countryIsoCode: String? = null,
     val notes: List<String>
 )

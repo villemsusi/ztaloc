@@ -25,11 +25,25 @@ class PolicyEvaluator(
         if (!score.applicationChecksumMatches) {
             return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Application checksum mismatch")
         }
+        if (!score.requestFresh) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Replay or stale request detected")
+        }
+        if (!score.secureLockEnabled) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Secure lock screen is disabled")
+        }
+        if (!score.hardwareBackedKeysAvailable) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Hardware-backed keys are unavailable")
+        }
+        if (score.repeatedFailures) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Repeated failed requests detected")
+        }
+        if (score.impossibleMovementSuspected) {
+            return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Impossible travel detected")
+        }
         if (
             score.device < requiredCategoryScore(score.deviceMax) ||
             score.context < requiredCategoryScore(score.contextMax) ||
-            score.behavior < requiredCategoryScore(score.behaviorMax) ||
-            score.trustRecency < requiredCategoryScore(score.trustRecencyMax)
+            score.behavior < requiredCategoryScore(score.behaviorMax)
         ) {
             return PolicyResult(AccessDecision.DENY, LocationExposure.NONE, "Minimum trust category score not met")
         }

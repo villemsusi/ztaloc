@@ -45,6 +45,18 @@ class LocalStore(
             .mapNotNull { raw -> runCatching { json.decodeFromString<SessionRecord>(unprotect(raw.toString())) }.getOrNull() }
     }
 
+    suspend fun getAuditLogEntries(): List<AuditLogEntry> {
+        val raw = context.ztaDataStore.data.first()[AUDIT_LOG_KEY] ?: return emptyList()
+        return runCatching { json.decodeFromString<AuditLogEntryList>(unprotect(raw)).entries }.getOrDefault(emptyList())
+    }
+
+    suspend fun appendAuditLogEntry(entry: AuditLogEntry, maxEntries: Int = MAX_AUDIT_LOG_ENTRIES) {
+        val updated = (getAuditLogEntries() + entry).takeLast(maxEntries)
+        context.ztaDataStore.edit { prefs ->
+            prefs[AUDIT_LOG_KEY] = protect(json.encodeToString(AuditLogEntryList(updated)))
+        }
+    }
+
     suspend fun putString(key: String, value: String) {
         context.ztaDataStore.edit { prefs -> prefs[stringPreferencesKey(key)] = protect(value) }
     }
@@ -127,5 +139,7 @@ class LocalStore(
         private val USER_KEY = stringPreferencesKey("user")
         private val PAIRED_DEVICES_KEY = stringPreferencesKey("paired_devices")
         private val SEMANTIC_LABELS_KEY = stringPreferencesKey("semantic_location_labels")
+        private val AUDIT_LOG_KEY = stringPreferencesKey("audit_log")
+        private const val MAX_AUDIT_LOG_ENTRIES = 500
     }
 }

@@ -68,6 +68,21 @@ data class LocationAccessResult(
     val reason: String
 )
 
+@Serializable
+data class SecureAuditLogEntry(
+    val sequence: Long,
+    val eventType: String,
+    val subjectUserId: String?,
+    val subjectDeviceId: String?,
+    val sessionId: String?,
+    val result: String,
+    val issuedAtEpochMs: Long,
+    val metadata: Map<String, String>,
+    val previousHashB64: String?,
+    val entryHashB64: String,
+    val signatureB64: String
+)
+
 data class LocalAuthenticationResult(
     val authenticated: Boolean,
     val multiFactorSatisfied: Boolean,

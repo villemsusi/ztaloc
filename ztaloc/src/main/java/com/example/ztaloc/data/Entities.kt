@@ -26,8 +26,28 @@ data class SessionRecord(
 )
 
 @Serializable
+data class AuditLogEntry(
+    val sequence: Long,
+    val eventType: String,
+    val subjectUserId: String?,
+    val subjectDeviceId: String?,
+    val sessionId: String?,
+    val result: String,
+    val issuedAtEpochMs: Long,
+    val metadata: Map<String, String> = emptyMap(),
+    val previousHashB64: String?,
+    val entryHashB64: String,
+    val signatureB64: String
+)
+
+@Serializable
 data class PairedDeviceList(
     val devices: List<PairedDevice>
+)
+
+@Serializable
+data class AuditLogEntryList(
+    val entries: List<AuditLogEntry>
 )
 
 @Serializable

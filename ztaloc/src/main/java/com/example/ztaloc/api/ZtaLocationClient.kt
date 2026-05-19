@@ -17,6 +17,7 @@ interface ZtaLocationClient {
     ): Result<Unit>
     suspend fun removeSemanticLocationLabel(label: String): Result<Unit>
     suspend fun listSemanticLocationLabels(): Result<List<SemanticLocationLabel>>
+    suspend fun listSecureAuditLog(): Result<List<SecureAuditLogEntry>>
 
     suspend fun createLocationRequest(target: PairedDevice, activity: Activity): Result<OutgoingRequest>
     suspend fun processIncomingRequest(requestPayload: String): Result<OutgoingResponse>

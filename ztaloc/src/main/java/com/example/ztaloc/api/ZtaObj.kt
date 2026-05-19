@@ -59,6 +59,9 @@ object ZtaObj {
     suspend fun listSemanticLocationLabels(): Result<List<SemanticLocationLabel>> =
         requireClient().listSemanticLocationLabels()
 
+    suspend fun listSecureAuditLog(): Result<List<SecureAuditLogEntry>> =
+        requireClient().listSecureAuditLog()
+
     suspend fun createLocationRequest(target: PairedDevice, activity: Activity): Result<OutgoingRequest> =
         requireClient().createLocationRequest(target, activity)
 
