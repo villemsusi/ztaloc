@@ -30,6 +30,15 @@ class TransportCrypto {
     fun ensureSigningKey(alias: String) {
         if (keyStore.containsAlias(alias) && isEcP256Key(alias)) return
         if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+        generateSigningKey(alias)
+    }
+
+    fun rotateSigningKey(alias: String) {
+        if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+        generateSigningKey(alias)
+    }
+
+    private fun generateSigningKey(alias: String) {
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
         val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
             .setAlgorithmParameterSpec(ECGenParameterSpec(P256_CURVE))
@@ -42,6 +51,15 @@ class TransportCrypto {
     fun ensureEncryptionKey(alias: String) {
         if (keyStore.containsAlias(alias) && encryptionKeySupportsEcdhP256(alias)) return
         if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+        generateEncryptionKey(alias)
+    }
+
+    fun rotateEncryptionKey(alias: String) {
+        if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+        generateEncryptionKey(alias)
+    }
+
+    private fun generateEncryptionKey(alias: String) {
         val generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore")
         val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_AGREE_KEY)
             .setAlgorithmParameterSpec(ECGenParameterSpec(P256_CURVE))
@@ -49,6 +67,12 @@ class TransportCrypto {
         generator.initialize(spec)
         generator.generateKeyPair()
     }
+
+    fun deleteKey(alias: String) {
+        if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+    }
+
+    fun containsKey(alias: String): Boolean = keyStore.containsAlias(alias)
 
     fun exportPublicKey(alias: String): String {
         val cert = keyStore.getCertificate(alias)

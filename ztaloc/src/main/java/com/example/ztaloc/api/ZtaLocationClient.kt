@@ -5,6 +5,9 @@ import android.app.Activity
 interface ZtaLocationClient {
     suspend fun setupUser(userId: String, displayName: String? = null): Result<SetupResult>
     suspend fun getDeviceRegistrationInfo(): Result<DeviceRegistrationInfo>
+    suspend fun getKeyLifecycleStatus(): Result<KeyLifecycleStatus>
+    suspend fun rotateLocalKeys(reason: String? = null): Result<KeyRotationResult>
+    suspend fun clearLocalKeyMaterial(): Result<Unit>
     suspend fun upsertPairedDevice(device: PairedDevice, expectedPairingFingerprint: String): Result<Unit>
     suspend fun pairingFingerprint(device: PairedDevice): Result<String>
     suspend fun removePairedDevice(deviceId: String): Result<Unit>

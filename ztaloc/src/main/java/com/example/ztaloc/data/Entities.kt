@@ -9,7 +9,11 @@ data class LocalUser(
     val userId: String,
     val displayName: String?,
     val deviceId: String?,
-    val registeredAtEpochMs: Long?
+    val registeredAtEpochMs: Long?,
+    val keyVersion: Int = 1,
+    val keysCreatedAtEpochMs: Long? = registeredAtEpochMs,
+    val keysRotatedAtEpochMs: Long? = null,
+    val keyRotationReason: String? = null
 )
 
 @Serializable

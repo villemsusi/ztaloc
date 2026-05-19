@@ -33,6 +33,15 @@ object ZtaObj {
     suspend fun getDeviceRegistrationInfo(): Result<DeviceRegistrationInfo> =
         requireClient().getDeviceRegistrationInfo()
 
+    suspend fun getKeyLifecycleStatus(): Result<KeyLifecycleStatus> =
+        requireClient().getKeyLifecycleStatus()
+
+    suspend fun rotateLocalKeys(reason: String? = null): Result<KeyRotationResult> =
+        requireClient().rotateLocalKeys(reason)
+
+    suspend fun clearLocalKeyMaterial(): Result<Unit> =
+        requireClient().clearLocalKeyMaterial()
+
     suspend fun upsertPairedDevice(device: PairedDevice, expectedPairingFingerprint: String): Result<Unit> =
         requireClient().upsertPairedDevice(device, expectedPairingFingerprint)
 

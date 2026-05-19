@@ -21,6 +21,27 @@ data class DeviceRegistrationInfo(
 )
 
 @Serializable
+data class KeyLifecycleStatus(
+    val userId: String,
+    val deviceId: String,
+    val signingPublicKeyB64: String,
+    val encryptionPublicKeyB64: String,
+    val keyVersion: Int,
+    val createdAtEpochMs: Long,
+    val rotatedAtEpochMs: Long?,
+    val rotationReason: String?,
+    val pairingFingerprint: String
+)
+
+@Serializable
+data class KeyRotationResult(
+    val registrationInfo: DeviceRegistrationInfo,
+    val lifecycleStatus: KeyLifecycleStatus,
+    val previousPairingFingerprint: String,
+    val message: String
+)
+
+@Serializable
 data class PairedDevice(
     val userId: String,
     val displayName: String?,

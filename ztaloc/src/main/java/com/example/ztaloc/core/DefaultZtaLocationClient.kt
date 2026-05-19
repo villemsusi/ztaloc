@@ -137,6 +137,66 @@ class DefaultZtaLocationClient(
             registeredAtEpochMs = requireNotNull(user.registeredAtEpochMs)
         )
     }
+
+    override suspend fun getKeyLifecycleStatus(): Result<KeyLifecycleStatus> = runCatching {
+        val user = requireNotNull(store.getUser()) { "User not initialized" }
+        lifecycleStatus(user)
+    }
+
+    override suspend fun rotateLocalKeys(reason: String?): Result<KeyRotationResult> = runCatching {
+        val user = requireNotNull(store.getUser()) { "User not initialized" }
+        val previousSigningPublicKey = crypto.exportPublicKey(SIGNING_ALIAS)
+        val previousEncryptionPublicKey = crypto.exportPublicKey(ENCRYPTION_ALIAS)
+        val previousFingerprint = crypto.pairingFingerprint(previousSigningPublicKey, previousEncryptionPublicKey)
+
+        crypto.rotateSigningKey(SIGNING_ALIAS)
+        crypto.rotateEncryptionKey(ENCRYPTION_ALIAS)
+
+        val now = System.currentTimeMillis()
+        val updatedUser = user.copy(
+            keyVersion = user.keyVersion + 1,
+            keysCreatedAtEpochMs = user.keysCreatedAtEpochMs ?: user.registeredAtEpochMs ?: now,
+            keysRotatedAtEpochMs = now,
+            keyRotationReason = reason
+        )
+        store.saveUser(updatedUser)
+        val status = lifecycleStatus(updatedUser)
+        appendAuditLog(
+            eventType = "LOCAL_KEYS_ROTATED",
+            subjectUserId = updatedUser.userId,
+            subjectDeviceId = updatedUser.deviceId,
+            sessionId = null,
+            result = "SUCCESS",
+            metadata = mapOf(
+                "keyVersion" to updatedUser.keyVersion.toString(),
+                "previousPairingFingerprint" to previousFingerprint,
+                "newPairingFingerprint" to status.pairingFingerprint,
+                "reason" to (reason ?: "unspecified")
+            )
+        )
+
+        KeyRotationResult(
+            registrationInfo = registrationInfo(updatedUser),
+            lifecycleStatus = status,
+            previousPairingFingerprint = previousFingerprint,
+            message = "Local keys rotated. Previously paired devices must register the new public keys."
+        )
+    }
+
+    override suspend fun clearLocalKeyMaterial(): Result<Unit> = runCatching {
+        val user = store.getUser()
+        appendAuditLog(
+            eventType = "LOCAL_KEY_MATERIAL_CLEARED",
+            subjectUserId = user?.userId,
+            subjectDeviceId = user?.deviceId,
+            sessionId = null,
+            result = "SUCCESS"
+        )
+        crypto.deleteKey(SIGNING_ALIAS)
+        crypto.deleteKey(ENCRYPTION_ALIAS)
+        store.clearLocalIdentityAndPairings()
+    }
+
     override suspend fun upsertPairedDevice(device: PairedDevice, expectedPairingFingerprint: String): Result<Unit> = runCatching {
         validatePairingKeys(device)
         val actualFingerprint = pairingFingerprint(device).getOrThrow()
@@ -144,6 +204,14 @@ class DefaultZtaLocationClient(
             "Pairing fingerprint mismatch"
         }
         store.upsertPairedDevice(device)
+        appendAuditLog(
+            eventType = "PAIRED_DEVICE_UPSERTED",
+            subjectUserId = device.userId,
+            subjectDeviceId = device.deviceId,
+            sessionId = null,
+            result = "SUCCESS",
+            metadata = mapOf("pairingFingerprint" to actualFingerprint)
+        )
     }
 
     override suspend fun pairingFingerprint(device: PairedDevice): Result<String> = runCatching {
@@ -153,6 +221,13 @@ class DefaultZtaLocationClient(
 
     override suspend fun removePairedDevice(deviceId: String): Result<Unit> = runCatching {
         store.removePairedDevice(deviceId)
+        appendAuditLog(
+            eventType = "PAIRED_DEVICE_REVOKED",
+            subjectUserId = null,
+            subjectDeviceId = deviceId,
+            sessionId = null,
+            result = "SUCCESS"
+        )
     }
 
     override suspend fun listPairedDevices(): Result<List<PairedDevice>> = runCatching {
@@ -614,6 +689,33 @@ class DefaultZtaLocationClient(
 
     private suspend fun clearLocalUserState() {
         store.remove("user")
+    }
+
+    private fun registrationInfo(user: LocalUser): DeviceRegistrationInfo {
+        return DeviceRegistrationInfo(
+            userId = user.userId,
+            displayName = user.displayName,
+            deviceId = requireNotNull(user.deviceId) { "Device not initialized" },
+            signingPublicKeyB64 = crypto.exportPublicKey(SIGNING_ALIAS),
+            encryptionPublicKeyB64 = crypto.exportPublicKey(ENCRYPTION_ALIAS),
+            registeredAtEpochMs = requireNotNull(user.registeredAtEpochMs) { "Device not initialized" }
+        )
+    }
+
+    private fun lifecycleStatus(user: LocalUser): KeyLifecycleStatus {
+        val signingPublicKey = crypto.exportPublicKey(SIGNING_ALIAS)
+        val encryptionPublicKey = crypto.exportPublicKey(ENCRYPTION_ALIAS)
+        return KeyLifecycleStatus(
+            userId = user.userId,
+            deviceId = requireNotNull(user.deviceId) { "Device not initialized" },
+            signingPublicKeyB64 = signingPublicKey,
+            encryptionPublicKeyB64 = encryptionPublicKey,
+            keyVersion = user.keyVersion,
+            createdAtEpochMs = user.keysCreatedAtEpochMs ?: requireNotNull(user.registeredAtEpochMs),
+            rotatedAtEpochMs = user.keysRotatedAtEpochMs,
+            rotationReason = user.keyRotationReason,
+            pairingFingerprint = crypto.pairingFingerprint(signingPublicKey, encryptionPublicKey)
+        )
     }
 
     private fun processedRequestKey(sessionId: String): String = "processed_request:$sessionId"

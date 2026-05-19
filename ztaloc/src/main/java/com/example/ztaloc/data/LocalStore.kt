@@ -68,6 +68,13 @@ class LocalStore(
         context.ztaDataStore.edit { prefs -> prefs.remove(stringPreferencesKey(key)) }
     }
 
+    suspend fun clearLocalIdentityAndPairings() {
+        context.ztaDataStore.edit { prefs ->
+            prefs.remove(USER_KEY)
+            prefs.remove(PAIRED_DEVICES_KEY)
+        }
+    }
+
     suspend fun getPairedDevices(): List<PairedDevice> {
         val raw = context.ztaDataStore.data.first()[PAIRED_DEVICES_KEY] ?: return emptyList()
         return runCatching { json.decodeFromString<PairedDeviceList>(unprotect(raw)).devices }.getOrDefault(emptyList())
