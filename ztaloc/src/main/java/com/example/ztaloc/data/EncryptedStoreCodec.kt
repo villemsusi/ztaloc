@@ -5,7 +5,6 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
-import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -15,13 +14,12 @@ internal class EncryptedStoreCodec(
     private val alias: String = "zta_store_encryption"
 ) {
     private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    private val secureRandom = SecureRandom()
 
     fun encode(plaintext: String): String {
-        val iv = ByteArray(GCM_IV_BYTES).also { secureRandom.nextBytes(it) }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
         val ciphertext = cipher.doFinal(plaintext.toByteArray(StandardCharsets.UTF_8))
+        val iv = cipher.iv
         return "$PREFIX${Base64.encodeToString(iv + ciphertext, Base64.NO_WRAP)}"
     }
 
