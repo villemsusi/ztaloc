@@ -1,5 +1,6 @@
 [versions]
 agp = "9.1.1"
+kotlin = "2.2.10"
 coreKtx = "1.18.0"
 datastorePreferences = "1.2.1"
 integrity = "1.6.0"
@@ -32,4 +33,5 @@ play-services-location = { module = "com.google.android.gms:play-services-locati
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
-
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

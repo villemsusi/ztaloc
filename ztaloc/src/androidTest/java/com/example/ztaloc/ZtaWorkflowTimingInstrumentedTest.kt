@@ -39,25 +39,60 @@ class ZtaWorkflowTimingInstrumentedTest {
             reason = "Instrumentation test bypass"
         )
 
-        val request = client.createLocationRequestForTesting(self, auth).getOrThrow()
-        val response = client.processIncomingRequest(request.payload).getOrThrow()
-        val result = client.processIncomingResponse(response.payload).getOrThrow()
+        val createTimes = mutableListOf<Double>()
+        val processRequestTimes = mutableListOf<Double>()
+        val processResponseTimes = mutableListOf<Double>()
+        val fullWorkflowTimes = mutableListOf<Double>()
 
-        assertNotNull(result)
+        repeat(MEASURED_RUNS) { index ->
+            val request = client.createLocationRequestForTesting(self, auth).getOrThrow()
+            val response = client.processIncomingRequest(request.payload).getOrThrow()
+            val result = client.processIncomingResponse(response.payload).getOrThrow()
+
+            assertNotNull(result)
+
+            val create = requireNotNull(ZtaTiming.lastCreateLocationRequest)
+            val processRequest = requireNotNull(ZtaTiming.lastProcessIncomingRequest)
+            val processResponse = requireNotNull(ZtaTiming.lastProcessIncomingResponse)
+            val total = create.totalMs + processRequest.totalMs + processResponse.totalMs
+
+            createTimes += create.totalMs
+            processRequestTimes += processRequest.totalMs
+            processResponseTimes += processResponse.totalMs
+            fullWorkflowTimes += total
+
+            println("ZTA_TIMING_RUN run=${index + 1} ${create.toLogString()}")
+            println("ZTA_TIMING_RUN run=${index + 1} ${processRequest.toLogString()}")
+            println("ZTA_TIMING_RUN run=${index + 1} ${processResponse.toLogString()}")
+            println("ZTA_TIMING_RUN run=${index + 1} fullRequestResponseWorkflow total=${"%.3f".format(total)}ms")
+        }
 
         val customPayload = """{"type":"custom","message":"hello from non-standard payload"}"""
         val encryptedPayload = client.encryptPayload(self, customPayload).getOrThrow()
         val decryptedPayload = client.decryptPayload(encryptedPayload).getOrThrow()
         assertEquals(customPayload, decryptedPayload)
 
-        val create = requireNotNull(ZtaTiming.lastCreateLocationRequest)
-        val processRequest = requireNotNull(ZtaTiming.lastProcessIncomingRequest)
-        val processResponse = requireNotNull(ZtaTiming.lastProcessIncomingResponse)
-        val total = create.totalMs + processRequest.totalMs + processResponse.totalMs
+        println("ZTA_TIMING_SUMMARY runs=$MEASURED_RUNS")
+        println("ZTA_TIMING_SUMMARY ${stats("createLocationRequest", createTimes)}")
+        println("ZTA_TIMING_SUMMARY ${stats("processIncomingRequest", processRequestTimes)}")
+        println("ZTA_TIMING_SUMMARY ${stats("processIncomingResponse", processResponseTimes)}")
+        println("ZTA_TIMING_SUMMARY ${stats("fullRequestResponseWorkflow", fullWorkflowTimes)}")
+    }
 
-        println(create.toLogString())
-        println(processRequest.toLogString())
-        println(processResponse.toLogString())
-        println("fullRequestResponseWorkflow total=${"%.3f".format(total)}ms")
+    private fun stats(label: String, values: List<Double>): String {
+        val mean = values.average()
+        val min = values.minOrNull() ?: 0.0
+        val max = values.maxOrNull() ?: 0.0
+        val variance = values
+            .map { value -> (value - mean) * (value - mean) }
+            .average()
+        val stddev = kotlin.math.sqrt(variance)
+        return "$label mean=${mean.formatMs()}ms min=${min.formatMs()}ms max=${max.formatMs()}ms stddev=${stddev.formatMs()}ms"
+    }
+
+    private fun Double.formatMs(): String = "%.3f".format(this)
+
+    private companion object {
+        private const val MEASURED_RUNS = 10
     }
 }
